@@ -1,14 +1,14 @@
 {
   "name": "Bibel",
   "short_name": "Bibel",
-  "description": "Bibel lesen, Kapitel abhaken, Verse markieren – offline.",
+  "description": "Bibel lesen, Kapitel abhaken, Verse markieren, Lesepläne – offline.",
   "lang": "de",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#F3F4F0",
-  "theme_color": "#2D4A8C",
+  "theme_color": "#14213D",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },

@@ -1,8 +1,9 @@
-// Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v2, bibel-v3 …)
-const SHELL = 'bibel-v2';
-const DATA = 'bibel-data-v1'; // nur ändern, wenn sich Bibeltexte ändern
+// Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v5, bibel-v6 …)
+const SHELL = 'bibel-v6';
+const DATA = 'bibel-data-v2'; // nur ändern, wenn sich Bibeltexte ändern (V2/Sitzung 1: Menge bereinigt)
 
-const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'catalog.json',
+const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plans.js', 'prayer.js', 'cards.js', 'compare.js', 'paths.js', 'intro.js', 'zeit.js', 'register.js', 'manifest.webmanifest',
+  'catalog.json', 'plaene.json', 'themen.json', 'einf.json', 'zeit.json', 'register.json',
   'icon-192.png', 'icon-512.png',
   'literata-latin-400-normal.woff2', 'literata-latin-400-italic.woff2', 'literata-latin-600-normal.woff2',
   'figtree-latin-400-normal.woff2', 'figtree-latin-600-normal.woff2', 'figtree-latin-700-normal.woff2'];
@@ -19,7 +20,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  const isText = /\/(lut|elb|sch|men|ext)\.json$/.test(url.pathname);
+  const isText = /\/(lut|elb|sch|men|ext|ext-de)\.json$/.test(url.pathname);
   if (isText) {
     // Bibeltexte: aus dem Cache, sonst laden und dauerhaft ablegen
     e.respondWith(caches.open(DATA).then(async c => {
