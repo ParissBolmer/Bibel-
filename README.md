@@ -7,6 +7,20 @@ Version 2, Stand Sitzung 3 (damit ist Version 2 abgeschlossen; Anzeige unter **M
 - Sitzung 2: Verskarten zum wörtlichen Auswendiglernen, Einführung zu jedem Buch (106), 16 Themen-Lesewege, neuer Übersetzungsvergleich.
 - Sitzung 3: Zeitleiste (11 Epochen, 132 Ereignisse mit Jahresspannen und Sicherheitsstufe), Personen- und Ortsregister (213 Personen, 102 Orte, Stellenverweise, Suche, optional antippbare Namen im Text), Barrierefreiheit (Kontrast in Hell/Sepia/Dunkel gemessen, Tippflächen, Namen der Bedienelemente), Stichprobe „Didache auf Deutsch“ als KI-Übertragung aus dem Englischen. Die Recherche zu einer besseren Textfassung ergab nichts frei Lizenziertes und Vollständiges (siehe `LIZENZ-RECHERCHE.md` im Projektordner).
 
+Neu (Lesefassung, nach Version 2): **Luther 1912 · heute**, als eigene Übersetzung wählbar. Derselbe Luthertext, automatisch angepasst: ß nach kurzem Vokal als ss (daß → dass, muß → muss), deutsche Anführungszeichen „…“ und ‚…‘, Apostroph ’, Gedankenstrich –. Wortwahl, Satzbau und Verszählung bleiben unverändert („ward“, „Odem“ bleiben). Das Original „Luther 1912“ bleibt daneben erhalten. Markierungen, Notizen und das Register (Namen im Text) gelten für beide Luther-Fassungen.
+
+## Lesefassungen erzeugen (`modernisiere.py`)
+
+`pip install pyspellchecker`, dann `python3 -I modernisiere.py lut` → schreibt `lutn.json` und den Bericht `modernisiere-lut.txt` (jede geänderte Wortform mit Anzahl, alle bewusst mit ß gelassenen Formen, Kapitel mit unpaarigen Anführungszeichen in der Quelle).
+
+- Entscheidung ß/ss je Wort über ein Häufigkeitswörterbuch heutigen Deutschs (pyspellchecker, `de`). ß vor Vokal und nach ei/au/ie usw. bleibt immer. Mehrdeutige Fälle (Schoß/schoss, Floß/floss, Mutterschoß …) stehen fest im Skript (`FEST`).
+- Das Skript prüft selbst, dass Verszahlen und Buchstabenfolge (abgesehen von ß/ss) gleich bleiben.
+- Ergebnis Luther: 10 122 Stellen geändert, 0 unentschieden. Die Änderungsliste wurde einmal ganz durchgesehen, der Text selbst nur in Stichproben.
+- Bekannt: In Eph 5,31 fehlt schon in der Quelle das schließende Anführungszeichen.
+- Noch nicht gemacht: Elberfelder, Schlachter, Menge (dafür wäre `FEST` zu erweitern), alte Wörter ersetzen (ward → wurde), Absätze.
+
+Bei neuer Lesefassung: Eintrag in `catalog.json`, Dateiname in die Muster in `sw.js` und `app.js` (`lut|lutn|…`), SHELL hochzählen.
+
 ## Auf GitHub Pages veröffentlichen
 
 1. Auf GitHub ein neues Repository anlegen (z. B. `bibel`), öffentlich.
@@ -17,11 +31,11 @@ Version 2, Stand Sitzung 3 (damit ist Version 2 abgeschlossen; Anzeige unter **M
 
 ## Update einspielen
 
-Alle geänderten Dateien hochladen und in `sw.js` die Zeile `const SHELL = 'bibel-v6'` hochzählen (`bibel-v7` …). Sonst zeigt das Handy weiter die alte Version. Ändert sich ein Bibeltext, zusätzlich `const DATA = 'bibel-data-v2'` hochzählen. Die App danach einmal ganz schließen und neu öffnen.
+Alle geänderten Dateien hochladen und in `sw.js` die Zeile `const SHELL = 'bibel-v7'` hochzählen (`bibel-v8` …). Sonst zeigt das Handy weiter die alte Version. Ändert sich ein Bibeltext, zusätzlich `const DATA = 'bibel-data-v2'` hochzählen. Die App danach einmal ganz schließen und neu öffnen.
 
 Neu oder geändert in Sitzung 3 (gegenüber Stand Sitzung 2): `app.js`, `style.css`, `sw.js`, `index.html`, `zeit.js`, `register.js`, `data/zeit.json`, `data/register.json`, `data/ext-de.json` (und diese `README.md`). Die Bibeltexte haben sich nicht geändert. `data/ext-de.json` (Didache auf Deutsch, KI-Übertragung) ist optional: ohne diese Datei läuft die App normal, nur der Schalter „Deutsch (KI)“ im Text der Didache fehlt.
 
-Stand jetzt: SHELL `bibel-v6`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
+Stand jetzt: SHELL `bibel-v7`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
 
 **Flache Version:** Wer ohne Unterordner hochlädt, erzeugt sie mit `python3 make_flat.py` (Ausgabe im Ordner `bibel-flat` neben dem Projekt); alle Dateien liegen dort in einer Ebene.
 
@@ -33,7 +47,7 @@ Lesefortschritt, Markierungen, Themen, Notizen, Lieblinge, Lesepläne, Gebete, V
 
 ## Textquellen
 
-- Luther 1912 – github.com/seven1m/open-bibles (gemeinfrei)
+- Luther 1912 – github.com/seven1m/open-bibles (gemeinfrei); „Luther 1912 · heute“ daraus mit `modernisiere.py`
 - Elberfelder 1905, Schlachter 1951, Menge 1939 – github.com/scrollmapper/bible_databases. Schlachter 1951 steht laut ebible.org (ebible.org/deu1951/copyright.htm) unter CC BY 4.0, Rechteinhaber Genfer Bibelgesellschaft; ob unsere Datei Zeichen für Zeichen dieser Fassung entspricht, ist nicht geprüft.
 - Personen und Orte: Stellenverweise aus STEPBible TIPNR (Tyndale House, Cambridge; CC BY 4.0), auf Luther-Verszählung umgerechnet und nur übernommen, wenn der Name im Luthertext steht. Kurzbeschreibungen und Epochenzuordnung sind KI-erstellt und nicht an der Fachliteratur nachgeprüft.
 - Außerkanonische Schriften (englisch) – github.com/scrollmapper/bible_databases_deuterocanonical

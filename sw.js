@@ -1,5 +1,5 @@
-// Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v5, bibel-v6 …)
-const SHELL = 'bibel-v6';
+// Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v7, bibel-v8 …)
+const SHELL = 'bibel-v7';
 const DATA = 'bibel-data-v2'; // nur ändern, wenn sich Bibeltexte ändern (V2/Sitzung 1: Menge bereinigt)
 
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plans.js', 'prayer.js', 'cards.js', 'compare.js', 'paths.js', 'intro.js', 'zeit.js', 'register.js', 'manifest.webmanifest',
@@ -20,7 +20,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  const isText = /\/(lut|elb|sch|men|ext|ext-de)\.json$/.test(url.pathname);
+  const isText = /\/(lut|lutn|elb|sch|men|ext|ext-de)\.json$/.test(url.pathname);
   if (isText) {
     // Bibeltexte: aus dem Cache, sonst laden und dauerhaft ablegen
     e.respondWith(caches.open(DATA).then(async c => {

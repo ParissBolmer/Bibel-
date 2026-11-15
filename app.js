@@ -90,7 +90,7 @@ async function loadJSON(url) {
   const p = fetch(url).then(r => {
     if (!r.ok) throw new Error(r.status);
     // Solange der Service Worker die Seite noch nicht steuert (erster Besuch), selbst in den Offline-Speicher legen
-    if (/^(lut|elb|sch|men|ext|ext-de)\.json$/.test(url) && 'caches' in window && !(navigator.serviceWorker && navigator.serviceWorker.controller))
+    if (/^(lut|lutn|elb|sch|men|ext|ext-de)\.json$/.test(url) && 'caches' in window && !(navigator.serviceWorker && navigator.serviceWorker.controller))
       { const copy = r.clone(); caches.open(DATA_CACHE).then(c => c.put(new URL(url, location.href).href, copy)).catch(() => {}); }
     return r.json();
   });
@@ -103,6 +103,7 @@ function indexCatalog() {
   CAT.extra.forEach((b, i) => { b.kind = 'x'; b.key = 'x:' + b.id; ORDER[b.key] = 200 + i; BOOK[b.key] = b; });
   Refs.init([...CAT.canon, ...CAT.apo, ...CAT.extra]);
 }
+const isLut = code => code === 'lut' || code === 'lutn';   // lutn: Luther 1912 in heutiger Schreibung, gleiche Verszählung
 const trName = code => (CAT.translations.find(t => t.code === code) || {}).name || code;
 function srcOf(book, tr = S.set.tr) {
   if (book.kind === 'c') return { url: `${tr}.json`, tr };
@@ -324,7 +325,7 @@ async function viewReader(book, ch, focusV, focusV2, ctx) {
   try { chapters = await chaptersOf(book); }
   catch (e) { view.innerHTML = `<div class="missing">Der Text konnte nicht geladen werden. Bist du offline? Lade die Übersetzung unter „Mehr → Offline speichern“, solange du online bist.</div>`; return; }
   const nCh = chapters.length;
-  const entOK = book.kind === 'c' && src.tr === 'lut';   // Register: nur kanonische Bücher in Luther-1912-Zählung
+  const entOK = book.kind === 'c' && isLut(src.tr);   // Register: nur kanonische Bücher in Luther-1912-Zählung
   if (entOK && S.set.ents) { try { await loadReg(); } catch (e) { /* ohne Register einfach ohne Namenslinks */ } }
   if (ch > nCh) ch = nCh;
   let C = chapters[ch - 1];
@@ -857,6 +858,7 @@ function viewSources() {
   view.innerHTML = `<div class="about">
   <div class="set" style="border-top:0"><h3>Bibelübersetzungen</h3>
     <p><b>Luther 1912</b> – Revision der Lutherbibel von 1912, gemeinfrei. Datei: open-bibles (github.com/seven1m/open-bibles). Wörter in Klammern sind Worterklärungen dieser Ausgabe.</p>
+    <p><b>Luther 1912 · heute</b> – derselbe Text, automatisch angepasst (Skript <code>modernisiere.py</code>): ß nach kurzem Vokal als ss (daß → dass, muß → muss), deutsche Anführungszeichen „…“ und ‚…‘, Apostroph ’, Gedankenstrich –. Wortwahl, Satzbau und Verszählung sind unverändert (also weiter „ward“, „Odem“). Die Liste aller Änderungen steht in <code>modernisiere-lut.txt</code>. Ein Mensch hat nur Stichproben geprüft.</p>
     <p><b>Elberfelder 1905</b>, <b>Schlachter 1951</b>, <b>Menge 1939</b> (inkl. Apokryphen) – aus scrollmapper/bible_databases (GitHub). Die Elberfelder 1905 und die Menge-Bibel 1939 sind gemeinfrei. Für die Schlachter-Bibel 1951 nennt ebible.org die Genfer Bibelgesellschaft als Rechteinhaberin und die Lizenz Creative Commons Namensnennung 4.0 (CC BY 4.0). Dass unser Text mit der dort veröffentlichten Fassung übereinstimmt, ist nicht Zeichen für Zeichen geprüft.</p></div>
   <div class="set"><h3>Außerkanonische Schriften</h3>
     <p>Englische Übersetzungen aus scrollmapper/bible_databases_deuterocanonical und der Reihe „Ante-Nicene Fathers“ (1885–1896). Ausgewählt wurden nur Texte, deren Übersetzung alt genug für Gemeinfreiheit ist. Die Übersetzerangaben bei jeder Schrift beruhen auf dem Textvergleich; wo „vermutlich“ steht, ist die Zuordnung nicht gesichert. Bei Texten aus den „Ante-Nicene Fathers“ sind Absätze in Sätze zerlegt; die Nummern sind daher Satz-, keine Versnummern.</p>
