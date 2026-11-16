@@ -80,6 +80,22 @@ const EU = (() => {
   const VERSE_CLASS = /(^|\s|-|_)(v|vs|vn|vers|verse|versnr|versnum|versenumber|verseno|vno)(\s|$|-|_|\d)/i;
   const CHAP_CLASS = /(^|\s|-|_)(k|kap|kapitel|chap|chapter|chapnum|chapternum|cn|kapnr|initial|dropcap)(\s|$|-|_|\d)/i;
 
+  const MARK = /^(\d{1,3}[a-z]?)(?:[-–]\d{1,3}[a-z]?)?$/;   // „12“, „12a“, „12–13“ -> erste Zahl
+  const LETTER = /[A-Za-zÀ-ÖØ-öø-ÿ]/g;
+
+  // Klassen, die laut CSS der EPUB unsichtbar sind (display:none), plus übliche Namen
+  function hiddenClasses(cssTexts) {
+    const out = new Set(['hide', 'hidden']);
+    cssTexts.forEach(css => {
+      String(css || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/([^{}]+)\{([^}]*)\}/g, (m, sel, body) => {
+        if (!/display\s*:\s*none|visibility\s*:\s*hidden/i.test(body)) return m;
+        sel.split(',').forEach(x => { const k = x.trim().match(/^[a-z0-9]*\.([\w-]+)$/i); if (k) out.add(k[1]); });
+        return m;
+      });
+    });
+    return out;
+  }
+
   async function readEpub(buf, progress) {
     const z = await unzip(buf);
     const cont = parseXml(await z.text('META-INF/container.xml') || '');
@@ -104,47 +120,109 @@ const EU = (() => {
     const firstStart = {}; tocStarts.forEach(s => { if (!firstStart[s.id]) firstStart[s.id] = s; });
     const startsByFile = {}; Object.values(firstStart).forEach(s => (startsByFile[s.file] = startsByFile[s.file] || []).push(s));
 
-    const books = {}, diag = { files: spine.length, tocBooks: Object.keys(firstStart).length, classes: {}, verseMarks: 0, chapMarks: 0, notes: 0 };
+    const css = []; for (const i of Object.values(items)) if (i.type === 'text/css') css.push(await z.text(i.href));
+    const HIDE = hiddenClasses(css);
+    const isHidden = n => { const c = n.getAttribute('class'); if (c && c.split(/\s+/).some(x => HIDE.has(x))) return true; return /display\s*:\s*none/i.test(n.getAttribute('style') || ''); };
+    const isSkip = (n, tag, cls) => { const etype = n.getAttribute('epub:type') || n.getAttributeNS && n.getAttributeNS('http://www.idpf.org/2007/ops', 'type') || ''; return tag === 'head' || tag === 'script' || tag === 'style' || tag === 'aside' || /footnote|endnote|noteref|rearnote/.test(etype) || SKIP_CLASS.test(cls); };
+    // sichtbarer Text eines Elements (ohne unsichtbare Teile), Leerraum entfernt
+    const visText = n => { let s = ''; for (const c of n.childNodes) { if (c.nodeType === 3) s += c.nodeValue; else if (c.nodeType === 1 && !isHidden(c)) s += visText(c); } return s; };
+    const markOf = n => { const m = visText(n).replace(/[\s   ]+/g, '').replace(/[.:,]$/, '').match(MARK); return m ? m[1] : null; };
+    const keyOf = (tag, cls) => tag + (cls ? '.' + cls : '');
+
+    // Vorlauf: Welche Klasse trägt Verszahlen, welche Kapitelzahlen? (Zahl als einziger sichtbarer Inhalt, fortlaufend)
+    const docs = [], stat = {};
+    for (let fi = 0; fi < spine.length; fi++) {
+      if (progress) progress(`Untersuche Datei ${fi + 1} von ${spine.length} …`);
+      const src = await z.text(spine[fi]); const doc = src ? parseXml(src) : null; docs.push(doc); if (!doc) continue;
+      const scan = el => {
+        for (const n of el.children) {
+          const tag = n.localName.toLowerCase(), cls = n.getAttribute('class') || '';
+          if (isHidden(n) || isSkip(n, tag, cls)) continue;
+          if (cls || /^(sup|span|a|b|strong|em|i|small|big)$/.test(tag)) {
+            const k = keyOf(tag, cls), st = stat[k] = stat[k] || { all: 0, num: 0, inc: 0, last: 0 };
+            st.all++;
+            const m = markOf(n);
+            if (m) { const v = parseInt(m, 10); st.num++; if (v === st.last + 1 || v === st.last) st.inc++; st.last = v; continue; }
+          }
+          scan(n);
+        }
+      };
+      scan(doc.body || doc.documentElement);
+    }
+    const cand = Object.entries(stat).filter(([k, s]) => s.num >= 20 && s.num >= s.all * 0.6 && s.inc >= s.num * 0.5 && !/^h[1-6]/.test(k)).sort((a, b) => b[1].num - a[1].num);
+    const verseKey = cand.length && cand[0][1].num >= 500 ? cand[0][0] : null;
+    const chapC = verseKey && cand.find(([k, s]) => k !== verseKey && s.num <= cand[0][1].num / 5);
+    const chapKey = chapC ? chapC[0] : null;
+
+    const books = {}, diag = { files: spine.length, tocBooks: Object.keys(firstStart).length, hiddenClasses: [...HIDE], detected: { verse: verseKey, chapter: chapKey }, classes: {}, numeric: {}, verseMarks: 0, chapMarks: 0, notes: 0, hidden: 0, samples: [] };
+    Object.entries(stat).filter(([, s]) => s.num >= 20).sort((a, b) => b[1].num - a[1].num).slice(0, 15).forEach(([k, s]) => diag.numeric[k] = [s.num, s.all, s.inc]);
     // pend: Kapitelzahl gesehen, Vers 1 beginnt mit dem nächsten Text. Text vor der ersten Kapitel-/Verszahl
-    // eines Buchs (z. B. die Einleitung der EÜ) wird nicht übernommen.
-    let book = null, cur = null, ch = 0, pendingH = '', newPara = false, pend = false;
-    const startVerse = (c, v) => { pend = false; cur = { c, v, t: '' }; if (pendingH) { cur.h = pendingH; pendingH = ''; } if (newPara) { cur.p = 1; newPara = false; } books[book].push(cur); };
-    const addText = s => { if (!book || !s) return; if (!cur) { if (!pend || !/\S/.test(s)) return; startVerse(ch, '1'); } cur.t += s; };
-    const setBook = id => { book = id; books[book] = books[book] || []; cur = null; ch = 0; pendingH = ''; pend = false; };
+    // eines Buchs (z. B. die Einleitung der EÜ) wird nicht übernommen – außer dem Absatz direkt vor einer ersten „2“
+    // (Bücher mit nur einem Kapitel: Vers 1 hat dort oft keine Zahl).
+    let book = null, cur = null, ch = 0, pendingH = '', newPara = false, pend = false, pre = '';
+    const startVerse = (c, v) => {
+      pend = false;
+      if (cur && !cur.t.trim() && cur.c === c && cur.v === v) return;   // Kapitelzahl und Verszahl 1 nacheinander
+      cur = { c, v, t: '' }; if (pendingH) { cur.h = pendingH; pendingH = ''; } if (newPara) { cur.p = 1; newPara = false; } books[book].push(cur);
+    };
+    const addText = s => { if (!book || !s) return; if (!cur) { if (!pend || !/\S/.test(s)) { pre += s; return; } startVerse(ch, '1'); } cur.t += s; };
+    const setBook = id => { book = id; books[book] = books[book] || []; cur = null; ch = 0; pendingH = ''; pend = false; pre = ''; };
+    const verseMark = (v, isChapCls) => {
+      if (!ch) ch = 1;
+      if (!cur && v === '2' && !books[book].length && pre.trim()) { startVerse(ch, '1'); cur.t = pre; }
+      if (v === '1' && cur && cur.c === ch && cur.v !== '1' && !isChapCls) ch++;   // Kapitelwechsel ohne eigene Kapitelzahl
+      startVerse(ch, v); diag.verseMarks++;
+    };
+    const masked = n => {   // Aufbau eines Absatzes ohne lesbaren Text (Buchstaben -> x), für die Diagnose
+      let s = ''; for (const c of n.childNodes) {
+        if (c.nodeType === 3) s += c.nodeValue.replace(LETTER, 'x');
+        else if (c.nodeType === 1) { const t = c.localName, cl = c.getAttribute('class'); s += `<${t}${cl ? ` class="${cl}"` : ''}>${masked(c)}</${t}>`; }
+      }
+      return s.replace(/x{2,}/g, 'xx');
+    };
 
     for (let fi = 0; fi < spine.length; fi++) {
       if (progress) progress(`Lese Datei ${fi + 1} von ${spine.length} …`);
-      const file = spine[fi], src = await z.text(file); if (!src) continue;
-      const doc = parseXml(src), anchors = new Map((startsByFile[file] || []).map(s => [s.anchor, s.id]));
+      const file = spine[fi], doc = docs[fi]; docs[fi] = null; if (!doc) continue;
+      const anchors = new Map((startsByFile[file] || []).map(s => [s.anchor, s.id]));
       if (anchors.has('')) setBook(anchors.get(''));
       const walk = el => {
         for (const n of el.childNodes) {
           if (n.nodeType === 3) { addText(n.nodeValue); continue; }
           if (n.nodeType !== 1) continue;
           const tag = n.localName.toLowerCase(), cls = n.getAttribute('class') || '', id = n.getAttribute('id') || '';
-          const etype = n.getAttribute('epub:type') || n.getAttributeNS && n.getAttributeNS('http://www.idpf.org/2007/ops', 'type') || '';
           if (cls) diag.classes[tag + '.' + cls] = (diag.classes[tag + '.' + cls] || 0) + 1;
           if (id && anchors.has(id)) setBook(anchors.get(id));
-          if (tag === 'script' || tag === 'style' || tag === 'aside' || /footnote|endnote|noteref|rearnote/.test(etype) || SKIP_CLASS.test(cls)) { diag.notes++; continue; }
+          if (isHidden(n)) { diag.hidden++; continue; }
+          if (isSkip(n, tag, cls)) { diag.notes++; continue; }
+          if (tag === 'p' && book && diag.samples.length < 3 && fi >= spine.length / 3 && (n.textContent || '').length > 150 && (!verseKey || n.getElementsByTagName('*').length)) diag.samples.push(masked(n).slice(0, 700));
           const txt = (n.textContent || '').replace(/\s+/g, '').replace(/[.:]$/, '');
           if (/^h[1-6]$/.test(tag)) {
             const bid = !anchors.size && bookIdOf(n.textContent);
             if (bid && (!book || bid !== book) && tag <= 'h2') { setBook(bid); continue; }
             if (/^\d{1,3}$/.test(txt) || /^(kapitel|psalm)\s*\d{1,3}$/i.test((n.textContent || '').trim())) { ch = +txt.replace(/\D/g, ''); cur = null; pend = true; diag.chapMarks++; continue; }
             if (book && (books[book].length || pend)) { const h = (n.textContent || '').replace(/\s+/g, ' ').trim(); if (h) pendingH = pendingH ? pendingH + ' · ' + h : h; }
+            pre = '';
             continue;
+          }
+          const key = keyOf(tag, cls);
+          if (book && (key === verseKey || key === chapKey)) {
+            const m = markOf(n);
+            if (m) {
+              if (key === chapKey) { ch = parseInt(m, 10); startVerse(ch, '1'); diag.chapMarks++; }
+              else verseMark(m, false);
+              continue;
+            }
           }
           if (isNum(txt) && n.children.length === 0 && book) {
             if (CHAP_CLASS.test(cls) && !VERSE_CLASS.test(cls)) { ch = parseInt(txt, 10); startVerse(ch, '1'); diag.chapMarks++; continue; }
             if (tag === 'sup' || VERSE_CLASS.test(cls)) {
               if (n.closest && n.closest('a') && /^[a-z*†]$/.test(txt)) { diag.notes++; continue; }
-              const v = txt; if (!ch) ch = 1;
-              if (v === '1' && cur && cur.c === ch && cur.v !== '1' && !CHAP_CLASS.test(cls)) ch++;   // Kapitelwechsel ohne eigene Kapitelzahl
-              startVerse(ch, v); diag.verseMarks++; continue;
+              verseMark(txt, CHAP_CLASS.test(cls)); continue;
             }
           }
           if (tag === 'sup' && /^[a-z*†]$/.test(txt)) { diag.notes++; continue; }   // Fußnotenzeichen
-          if (tag === 'p' || tag === 'div' && n.querySelector && !n.querySelector('p')) { if (cur && cur.t.trim()) newPara = true; }
+          if (tag === 'p' || tag === 'div' && n.querySelector && !n.querySelector('p')) { if (cur && cur.t.trim()) newPara = true; if (!cur) pre = ''; }
           walk(n);
           if (tag === 'p' || tag === 'br' || tag === 'div' || tag === 'li') addText(' ');
         }

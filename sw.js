@@ -1,5 +1,5 @@
 // Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v5, bibel-v6 …)
-const SHELL = 'bibel-v7';
+const SHELL = 'bibel-v8';
 const DATA = 'bibel-data-v2'; // nur ändern, wenn sich Bibeltexte ändern (V2/Sitzung 1: Menge bereinigt)
 
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plans.js', 'prayer.js', 'cards.js', 'compare.js', 'paths.js', 'intro.js', 'zeit.js', 'register.js', 'eu.js', 'manifest.webmanifest',

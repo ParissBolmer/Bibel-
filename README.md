@@ -15,8 +15,9 @@ Die Einheitsübersetzung 2016 (© Katholische Bibelanstalt) ist **nicht** im Rep
 - Beim Import werden die Verse auf die Zählung der App umgerechnet: Kanon wie Luther 1912, Apokryphen wie Menge 1939. Die Zuordnung läuft über Textähnlichkeit und Verszahl (Ausrichtung je Buch). Lesestand, Markierungen, Notizen, Lieblinge, Pläne und Verskarten bleiben dadurch unverändert gültig.
 - Zusätze: Ester-Verse mit Buchstaben (1,1a …) und Dan 3,24–90 sowie Dan 13–14 landen in „Zusätze zu Ester/Daniel“. Gebet Manasses gibt es in der EÜ nicht; es bleibt Menge. Die außerkanonischen Schriften sind nicht betroffen.
 - Zwischenüberschriften und Absätze der EÜ werden übernommen. Abweichende EÜ-Verszahlen stehen am Kapitelende, die Übersicht im **Prüfbericht**.
-- Erkennt der Import den Aufbau der Datei nicht, wird nichts gespeichert. Die App zeigt dann eine Diagnose ohne Bibeltext (nur Buchkennungen, Zähler, Klassennamen), mit der sich der Einleser anpassen lässt.
-- Getestet ist das bisher nur mit einer selbst gebauten Test-EPUB (Menge-Text in EÜ-Zählung). Die echte EÜ-Datei ist noch nicht geprüft.
+- Vers- und Kapitelzahlen erkennt der Einleser selbst: Er sucht die Klasse, deren Elemente fast nur eine fortlaufende Zahl enthalten (häufigste = Verse, deutlich seltenere = Kapitel). Laut CSS der EPUB unsichtbare Elemente (`display:none`, z. B. `span.hide`) werden übersprungen.
+- Erkennt der Import den Aufbau der Datei nicht, wird nichts gespeichert. Die App zeigt dann eine Diagnose ohne Bibeltext (Buchkennungen, Zähler, Klassennamen, erkannte Zahlklassen und bis zu drei Absatz-Muster, in denen jeder Buchstabe durch „x“ ersetzt ist), mit der sich der Einleser anpassen lässt.
+- Getestet ist das bisher nur mit selbst gebauten Test-EPUBs (Menge-Text in EÜ-Zählung; Verszahlen als `<sup>` bzw. als `span.fontx` mit unsichtbarem `span.hide`, Kapitelzahl als `span.big`). Die echte EÜ-Datei ist noch nicht erfolgreich eingelesen: Ein erster Versuch fand 73 Bücher, aber keine Vers- und Kapitelzahlen, weil deren Klassen nicht bekannt waren.
 - Test der Umrechnung: `node test_eu.js` (künstliche Quelle aus Menge mit Daniel-/Ester-Zusätzen, fehlendem Vers, zusammengelegten Versen; prüft jeden Vers und dass kein Text verloren geht).
 
 ## Auf GitHub Pages veröffentlichen
@@ -33,7 +34,7 @@ Alle geänderten Dateien hochladen und in `sw.js` die Zeile `const SHELL = 'bibe
 
 Neu oder geändert in Sitzung 3 (gegenüber Stand Sitzung 2): `app.js`, `style.css`, `sw.js`, `index.html`, `zeit.js`, `register.js`, `data/zeit.json`, `data/register.json`, `data/ext-de.json` (und diese `README.md`). Die Bibeltexte haben sich nicht geändert. `data/ext-de.json` (Didache auf Deutsch, KI-Übertragung) ist optional: ohne diese Datei läuft die App normal, nur der Schalter „Deutsch (KI)“ im Text der Didache fehlt.
 
-Stand jetzt: SHELL `bibel-v7`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
+Stand jetzt: SHELL `bibel-v8`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
 
 **Flache Version:** Wer ohne Unterordner hochlädt, erzeugt sie mit `python3 make_flat.py` (Ausgabe im Ordner `bibel-flat` neben dem Projekt); alle Dateien liegen dort in einer Ebene.
 
