@@ -28,11 +28,12 @@ const EU = (() => {
       const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
       const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
       const name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
-      files.set(name, { method, csize, lo });
+      files.set(name, { method, csize, lo, flags: dv.getUint16(p + 8, true) });
       p += 46 + nl + xl + cl;
     }
     return {
       names: [...files.keys()],
+      info: name => files.get(name),
       async text(name) {
         const f = files.get(name); if (!f) return null;
         const start = f.lo + 30 + dv.getUint16(f.lo + 26, true) + dv.getUint16(f.lo + 28, true);
@@ -330,6 +331,168 @@ const EU = (() => {
     orphans.forEach(run => { const f = run[0]; const C = chs[Math.min(f.c, chs.length) - 1]; const vi = Math.max(0, Math.min(C.v.length, parseInt(f.v, 10) - 1) - 1); C.v[vi] = (C.v[vi] + ' ' + run.map(s => s.t).join(' ')).trim(); });
   }
 
+  /* ---------- Strukturbericht (läuft nur lokal, enthält keinen Fließtext) ---------- */
+  // Text wird durch [TEXT n] ersetzt; erhalten bleiben nur Tags, Attribute, Dateinamen, kurze Zahlen
+  // (Vers-/Kapitelnummern) und die ersten 3 Wörter von Überschriften bzw. Inhaltsverzeichnis-Einträgen.
+  async function structReport(buf) {
+    const L = [], sec = t => L.push('', '## ' + t), add = (...s) => L.push(...s);
+    const short = (s, n = 3) => { const w = String(s || '').replace(/\s+/g, ' ').trim().split(' '); return w.slice(0, n).join(' ') + (w.length > n ? ' …' : ''); };
+    const keepTxt = s => /^[\s\d.,:;–\-—()\[\]a-z*†]{0,8}$/i.test(s) && /\d|^\s*[a-z*†]\s*$/i.test(s);
+    const safe = async (title, fn) => { sec(title); try { await fn(); } catch (e) { add('FEHLER in diesem Abschnitt: ' + (e && e.message || e)); } };
+    let z = null, opfPath = null, opf = null, items = {}, spine = [], toc = [];
+    add('# EPUB-Strukturbericht', 'Dateigröße: ' + buf.byteLength + ' Bytes');
+
+    await safe('1. ZIP / Kopierschutz', async () => {
+      const u8 = new Uint8Array(buf), dv = new DataView(buf);
+      add('Signatur am Anfang: ' + [...u8.subarray(0, 4)].map(b => b.toString(16).padStart(2, '0')).join(' ') + ' (ZIP = 50 4b 03 04)');
+      let e = u8.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+      add('Ende-Verzeichnis gefunden: ' + (e >= 0 ? 'ja, ' + (u8.length - 22 - e) + ' Bytes Kommentar' : 'NEIN'));
+      if (e >= 0) add('Einträge laut Verzeichnis: ' + dv.getUint16(e + 10, true) + ', Verzeichnis-Offset: ' + dv.getUint32(e + 16, true) + (dv.getUint32(e + 16, true) === 0xffffffff ? ' (ZIP64!)' : ''));
+      z = await unzip(buf);
+      add('Einträge gelesen: ' + z.names.length);
+      const meth = {}; z.names.forEach(n => { const m = z.info(n).method; meth[m] = (meth[m] || 0) + 1; });
+      add('Kompressionsmethoden: ' + JSON.stringify(meth) + ' (0 = stored, 8 = deflate)');
+      const enc = z.names.filter(n => z.info(n).flags & 1);
+      add('Einträge mit ZIP-Verschlüsselungsbit: ' + enc.length);
+      for (const f of ['META-INF/encryption.xml', 'META-INF/rights.xml', 'META-INF/license.lcpl']) {
+        if (!z.names.includes(f)) { add(f + ': nicht vorhanden'); continue; }
+        const t = await z.text(f); add(f + ': VORHANDEN (' + t.length + ' Zeichen)');
+        if (f === 'META-INF/encryption.xml') {
+          const d = parseXml(t), algs = {}; [...d.getElementsByTagName('*')].filter(x => x.localName === 'EncryptionMethod').forEach(x => { const a = x.getAttribute('Algorithm'); algs[a] = (algs[a] || 0) + 1; });
+          const refs = [...d.getElementsByTagName('*')].filter(x => x.localName === 'CipherReference').map(x => x.getAttribute('URI'));
+          add('  Algorithmen: ' + JSON.stringify(algs)); add('  verschlüsselte Dateien: ' + refs.length + ' – Beispiele: ' + refs.slice(0, 8).join(', '));
+        }
+      }
+      const ext = {}; z.names.forEach(n => { const x = (n.match(/\.([a-z0-9]+)$/i) || [, '(ohne)'])[1].toLowerCase(); ext[x] = (ext[x] || 0) + 1; });
+      add('Dateitypen: ' + JSON.stringify(ext));
+      const list = z.names.length > 80 ? [...z.names.slice(0, 25), '…', ...z.names.slice(-10)] : z.names;
+      add('Dateiliste:'); list.forEach(n => add('  ' + n + (n === '…' ? '' : '  [' + z.info(n).method + ', ' + z.info(n).csize + ' B]')));
+    });
+    if (!z) return L.join('\n');
+
+    await safe('2. Container und OPF', async () => {
+      const ct = await z.text('META-INF/container.xml');
+      add('container.xml: ' + (ct ? ct.replace(/\s+/g, ' ').slice(0, 600) : 'FEHLT'));
+      const rf = ct && parseXml(ct).getElementsByTagName('rootfile')[0];
+      opfPath = rf ? rf.getAttribute('full-path') : z.names.find(n => n.endsWith('.opf'));
+      add('OPF-Pfad: ' + opfPath);
+      const ot = opfPath && await z.text(opfPath); if (!ot) { add('OPF nicht lesbar'); return; }
+      opf = parseXml(ot); const pk = opf.getElementsByTagName('package')[0];
+      add('EPUB-Version: ' + (pk && pk.getAttribute('version')));
+      const base = dirOf(opfPath);
+      [...opf.getElementsByTagName('item')].forEach(i => items[i.getAttribute('id')] = { href: joinPath(base, decodeURIComponent(i.getAttribute('href') || '')), rawHref: i.getAttribute('href'), props: i.getAttribute('properties') || '', type: i.getAttribute('media-type') });
+      add('Manifest-Items: ' + Object.keys(items).length);
+      const nav = Object.entries(items).find(([, i]) => /\bnav\b/.test(i.props)), ncx = Object.entries(items).find(([, i]) => i.type === 'application/x-dtbncx+xml');
+      add('nav-Item: ' + (nav ? nav[1].href : 'keins') + ' · NCX: ' + (ncx ? ncx[1].href : 'keine'));
+      const miss = Object.values(items).filter(i => !z.names.includes(i.href)).map(i => i.rawHref);
+      add('Manifest-Dateien, die im ZIP nicht gefunden werden: ' + miss.length + (miss.length ? ' – z. B. ' + miss.slice(0, 5).join(', ') : ''));
+      const refs = [...opf.getElementsByTagName('itemref')];
+      spine = refs.map(r => items[r.getAttribute('idref')]).filter(Boolean).map(i => i.href);
+      add('Spine: ' + refs.length + ' Einträge, ' + spine.length + ' auflösbar');
+      const show = refs.length > 20 ? [...refs.slice(0, 15), null, ...refs.slice(-5)] : refs;
+      show.forEach(r => add(r ? '  ' + r.getAttribute('idref') + ' → ' + ((items[r.getAttribute('idref')] || {}).rawHref || '???') + (r.getAttribute('linear') ? ' linear=' + r.getAttribute('linear') : '') : '  …'));
+    });
+
+    await safe('3. Inhaltsverzeichnis', async () => {
+      const nav = Object.values(items).find(i => /\bnav\b/.test(i.props)), ncx = Object.values(items).find(i => i.type === 'application/x-dtbncx+xml');
+      const entries = [];
+      if (nav) { const d = parseXml(await z.text(nav.href) || ''), nb = dirOf(nav.href); [...d.getElementsByTagName('a')].forEach(a => { let dep = 0, p = a.parentNode; while (p && p.nodeType === 1) { if (p.localName === 'ol' || p.localName === 'ul') dep++; p = p.parentNode; } entries.push({ src: 'nav', dep, t: a.textContent, href: a.getAttribute('href') || '', base: nb }); }); }
+      if (ncx) { const d = parseXml(await z.text(ncx.href) || ''), nb = dirOf(ncx.href); [...d.getElementsByTagName('navPoint')].forEach(np => { let dep = 0, p = np.parentNode; while (p && p.localName === 'navPoint') { dep++; p = p.parentNode; } const lab = np.getElementsByTagName('text')[0], c = np.getElementsByTagName('content')[0]; entries.push({ src: 'ncx', dep: dep + 1, t: lab ? lab.textContent : '', href: c ? c.getAttribute('src') : '', base: nb }); }); }
+      add('Einträge: nav ' + entries.filter(x => x.src === 'nav').length + ', ncx ' + entries.filter(x => x.src === 'ncx').length);
+      const src = entries.some(x => x.src === 'nav') ? 'nav' : 'ncx';
+      const mine = entries.filter(x => x.src === src);
+      const deps = {}; mine.forEach(x => deps[x.dep] = (deps[x.dep] || 0) + 1); add('Tiefen (' + src + '): ' + JSON.stringify(deps));
+      add('Einträge der obersten zwei Ebenen (Titel gekürzt → erkannte Kennung · href):');
+      const minDep = Math.min(...mine.map(x => x.dep));
+      mine.filter(x => x.dep <= minDep + 1).slice(0, 160).forEach(x => add('  ' + '  '.repeat(x.dep - minDep) + short(x.t, 5) + ' → ' + (bookIdOf(x.t) || '-') + ' · ' + x.href));
+      const sub = mine.find(x => x.dep > minDep + 1); if (sub) add('Beispiel tiefere Ebene: ' + short(sub.t, 4) + ' · ' + sub.href);
+      const seen = {}; mine.forEach(x => { const id = bookIdOf(x.t); if (id && !seen[id]) { seen[id] = 1; const [f, h] = x.href.split('#'); toc.push({ id, file: joinPath(x.base, decodeURIComponent(f)), anchor: h || '' }); } });
+      add('Erkannte Bücher: ' + toc.length + ' – ' + toc.map(t => t.id).join(' '));
+      const all = new Set('GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH TOB JDT EST 1MA 2MA JOB PSA PRO ECC SNG WIS SIR ISA JER LAM BAR EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV'.split(' '));
+      toc.forEach(t => all.delete(t.id)); add('Nicht erkannt: ' + ([...all].join(' ') || 'keine'));
+    });
+
+    // Gerüst eines Ausschnitts: Tags/Attribute, Text als Platzhalter
+    function skeleton(doc, anchor, maxLines) {
+      const out = []; let started = !anchor, done = false;
+      const attrs = n => [...n.attributes].filter(a => /^(class|id|epub:type|type|href|role|lang|xml:lang|title)$/.test(a.name)).map(a => ` ${a.name}="${a.name === 'title' ? short(a.value, 2) : a.value.slice(0, 60)}"`).join('');
+      const walk = (n, d, inH) => {
+        for (const c of n.childNodes) {
+          if (done) return;
+          if (c.nodeType === 3) {
+            if (!started) continue;
+            const s = c.nodeValue; if (!/\S/.test(s)) continue;
+            out.push('  '.repeat(d) + (keepTxt(s) ? JSON.stringify(s.trim()) : inH ? '[ÜBERSCHRIFT: ' + short(s) + ']' : '[TEXT ' + s.trim().length + ']'));
+          } else if (c.nodeType === 1) {
+            const tag = c.localName;
+            if (!started && c.getAttribute('id') === anchor) started = true;
+            if (started) out.push('  '.repeat(d) + '<' + tag + attrs(c) + '>');
+            walk(c, started ? d + 1 : d, inH || /^h[1-6]$/.test(tag) || tag === 'title');
+          }
+          if (!done && out.length >= maxLines) { done = true; out.push('  … (gekürzt)'); }
+        }
+      };
+      walk(doc.body || doc.documentElement, 0, false);
+      if (anchor && !started) out.unshift('(Anker #' + anchor + ' nicht gefunden)');
+      return out;
+    }
+    await safe('4. Beispielausschnitte', async () => {
+      const want = ['GEN', 'PSA', 'EST', 'DAN', 'MAT'];
+      let samples = want.map(id => toc.find(t => t.id === id)).filter(Boolean);
+      if (!samples.length) samples = [spine[Math.floor(spine.length * 0.1)], spine[Math.floor(spine.length * 0.4)], spine[Math.floor(spine.length * 0.8)]].filter(Boolean).map(f => ({ id: '?', file: f, anchor: '' }));
+      for (const s of samples) {
+        const src = await z.text(s.file);
+        add('', '### ' + s.id + ' – ' + s.file + (s.anchor ? '#' + s.anchor : '') + (src ? ' (' + src.length + ' Zeichen)' : ' – DATEI NICHT GEFUNDEN'));
+        if (!src) continue;
+        add('Kopf: ' + src.slice(0, 200).replace(/\s+/g, ' ').replace(/>[^<]{12,}</g, m => '>[TEXT]<'));
+        skeleton(parseXml(src), s.anchor, 70).forEach(x => add(x));
+        // Psalm 23 bzw. Daniel 13 gesondert: Stelle im Verlauf des Buchs suchen
+        if (s.id === 'PSA' || s.id === 'DAN') {
+          const target = s.id === 'PSA' ? '23' : '13';
+          const from = Math.max(0, spine.indexOf(s.file));
+          for (let k = from; k < Math.min(spine.length, from + 200); k++) {
+            const d = parseXml(await z.text(spine[k]) || '');
+            const hit = [...d.getElementsByTagName('*')].find(e => e.children.length === 0 && (e.textContent || '').replace(/\D/g, '') === target && (e.textContent || '').trim().length <= 12 && !/^(sup)$/.test(e.localName) && !/v(ers)?\b|vn|verse/i.test(e.getAttribute('class') || ''));
+            if (hit) {
+              add('', '### ' + s.id + ' Kapitel ' + target + ' (vermutet) – ' + spine[k]);
+              let el = hit; while (el.parentNode && el.parentNode.localName !== 'body' && el.parentNode.children.length < 4) el = el.parentNode;
+              const nodes = [el]; for (let x = el.nextSibling; x && nodes.length < 40; x = x.nextSibling) nodes.push(x);
+              skeleton({ body: { childNodes: nodes } }, '', 50).forEach(x => add(x));
+              break;
+            }
+          }
+        }
+      }
+    });
+
+    await safe('5. Klassen- und Zahlen-Statistik (alle Spine-Dateien)', async () => {
+      const cls = {}, nums = {}, et = {}; let files = 0, chars = 0;
+      for (const f of spine) {
+        const src = await z.text(f); if (!src) continue; files++;
+        const d = parseXml(src);
+        for (const e of (d.body || d.documentElement).getElementsByTagName('*')) {
+          const k = e.localName + (e.getAttribute('class') ? '.' + e.getAttribute('class') : '');
+          cls[k] = (cls[k] || 0) + 1;
+          const t = e.getAttribute('epub:type') || (e.getAttributeNS && e.getAttributeNS('http://www.idpf.org/2007/ops', 'type')); if (t) et[e.localName + '[' + t + ']'] = (et[e.localName + '[' + t + ']'] || 0) + 1;
+          if (e.children.length === 0) { const s = (e.textContent || '').trim(); if (/^\d{1,3}[a-z]?[.:]?$/.test(s)) { const kk = k + (e.parentNode && e.parentNode.localName === 'a' ? ' (in a)' : ''); nums[kk] = (nums[kk] || 0) + 1; } else if (/^[a-z*†]$/.test(s)) { const kk = k + ' [Buchstabe/Zeichen]'; nums[kk] = (nums[kk] || 0) + 1; } }
+        }
+        chars += (d.body ? d.body.textContent.length : 0);
+      }
+      const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => '  ' + k + ': ' + v);
+      add('Dateien gelesen: ' + files + ' · Textzeichen gesamt: ' + chars);
+      add('Häufigste tag.class:'); top(cls, 45).forEach(x => add(x));
+      add('Elemente, die nur eine Zahl (oder ein Fußnotenzeichen) enthalten:'); top(nums, 25).forEach(x => add(x));
+      add('epub:type:'); top(et, 20).forEach(x => add(x));
+    });
+
+    await safe('6. Ergebnis des aktuellen Parsers', async () => {
+      const r = await readEpub(buf);
+      add('Bücher erkannt: ' + Object.keys(r.books).length + ' · Versmarken: ' + r.diag.verseMarks + ' · Kapitelmarken: ' + r.diag.chapMarks + ' · übersprungen (Fußnoten o. ä.): ' + r.diag.notes);
+      Object.entries(r.books).forEach(([id, a]) => { const chs = new Set(a.map(v => v.c)); add('  ' + id + ': ' + chs.size + ' Kap., ' + a.length + ' Verse, erstes ' + a[0].c + ',' + a[0].v + ', letztes ' + a[a.length - 1].c + ',' + a[a.length - 1].v); });
+    });
+    return L.join('\n');
+  }
+
   /* ---------- Speicher ---------- */
   async function save(data, meta) {
     const c = await caches.open(CACHE);
@@ -345,6 +508,6 @@ const EU = (() => {
   async function remove() { try { const c = await caches.open(CACHE); await c.delete(new URL(URL_, location.href).href); } catch (e) {} try { localStorage.removeItem(META); } catch (e) {} }
   function meta() { try { return JSON.parse(localStorage.getItem(META) || 'null'); } catch (e) { return null; } }
 
-  return { CACHE, URL: URL_, readEpub, build, mapBook, mapAdditions, align, toks, sim, bookIdOf, unzip, save, load, remove, meta };
+  return { CACHE, URL: URL_, readEpub, structReport, build, mapBook, mapAdditions, align, toks, sim, bookIdOf, unzip, save, load, remove, meta };
 })();
 if (typeof module !== 'undefined') module.exports = EU;

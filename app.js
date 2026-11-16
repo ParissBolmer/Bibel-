@@ -873,13 +873,14 @@ function euSection() {
   return `<div class="set"><h3>Einheitsübersetzung</h3>
     <p>${m ? `Importiert am ${esc(new Date(m.date).toLocaleDateString('de-DE'))} (${m.books.length} Bücher). Der Text liegt nur auf diesem Gerät und ist nicht in Sicherungen enthalten – auf einem neuen Gerät die EPUB-Datei einfach erneut importieren.`
       : 'Hast du die Einheitsübersetzung als E-Book (EPUB ohne Kopierschutz) gekauft, kannst du sie hier laden. Der Text bleibt nur auf diesem Gerät. Lesestand, Markierungen und Notizen bleiben erhalten: Die Verse werden auf die Zählung der App umgerechnet.'}</p>
-    <div class="opts"><button class="btn" id="euimp">${m ? 'Neu importieren' : 'EPUB-Datei importieren'}</button>${m ? '<button class="btn" id="eurep">Prüfbericht</button><button class="btn warn" id="eudel">Entfernen</button>' : ''}
+    <div class="opts"><button class="btn" id="euimp">${m ? 'Neu importieren' : 'EPUB-Datei importieren'}</button><button class="btn" id="eustr">Strukturbericht</button>${m ? '<button class="btn" id="eurep">Prüfbericht</button><button class="btn warn" id="eudel">Entfernen</button>' : ''}
     <input type="file" id="euf" accept=".epub,application/epub+zip" class="hidden"></div><p class="progress" id="eup"></p></div>`;
 }
 function euBind() {
   const f = $('#euf'); if (!f) return;
-  $('#euimp').onclick = () => f.click();
-  f.onchange = async () => { const file = f.files[0]; f.value = ''; if (file) await euImport(file); };
+  $('#euimp').onclick = () => { f.dataset.mode = 'imp'; f.click(); };
+  $('#eustr').onclick = () => { f.dataset.mode = 'str'; f.click(); };
+  f.onchange = async () => { const file = f.files[0]; f.value = ''; if (!file) return; if (f.dataset.mode === 'str') await euStruct(file, ''); else await euImport(file); };
   if ($('#eurep')) $('#eurep').onclick = () => euReport(euMeta());
   if ($('#eudel')) $('#eudel').onclick = async () => {
     if (!confirm('Einheitsübersetzung von diesem Gerät entfernen? Deine Markierungen und Notizen bleiben erhalten.')) return;
@@ -893,7 +894,7 @@ async function euImport(file) {
     say('Datei wird gelesen …');
     const raw = await EU.readEpub(await file.arrayBuffer(), say);
     const n = Object.keys(raw.books).length;
-    if (n < 40) { euDiag(raw); say(''); return; }
+    if (n < 40) { say(''); await euStruct(file, `In der Datei wurden nur ${n} Bücher erkannt. Es wurde nichts gespeichert, deine Daten sind unverändert.`); return; }
     say('Lade Luther und Menge zum Abgleich …');
     const [lut, men] = await Promise.all([loadJSON('lut.json'), loadJSON('men.json')]);
     const { data, rep } = await EU.build(raw, lut, men, CAT, say);
@@ -902,14 +903,22 @@ async function euImport(file) {
     await EU.save(data, meta); fileCache.delete(EU.URL);
     S.set.tr = 'eu'; save(); searchState.results = null;
     say(''); viewMore(); euReport(meta);
-  } catch (e) { say('Import fehlgeschlagen: ' + (e && e.message || e) + '. Deine bisherigen Daten sind unverändert.'); }
+  } catch (e) {
+    const msg = 'Import fehlgeschlagen: ' + (e && e.message || e) + '. Deine bisherigen Daten sind unverändert.';
+    say(msg); await euStruct(file, msg);
+  }
 }
-// Struktur nicht erkannt: Diagnose ohne Bibeltext (nur Buchkennungen, Zähler, Klassennamen), zum Weitergeben an den Entwickler
-function euDiag(raw) {
-  const d = Object.assign({}, raw.diag, { books: Object.fromEntries(Object.entries(raw.books).map(([b, a]) => [b, a.length])) });
-  const txt = JSON.stringify(d, null, 1);
-  openDlg(`<h3>Aufbau nicht erkannt</h3><p>In der Datei wurden nur ${Object.keys(raw.books).length} Bücher gefunden. Es wurde nichts gespeichert, deine Daten sind unverändert. Die folgende Diagnose enthält keinen Bibeltext, nur die Struktur der Datei – damit lässt sich der Import anpassen.</p><textarea readonly rows="8">${esc(txt)}</textarea><div class="row"><button class="btn" id="dcopy">Kopieren</button><button class="btn" data-close>Schließen</button></div>`, dl => {
-    $('#dcopy', dl).onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Kopiert'); } catch (e) {} };
+// Strukturbericht: läuft nur auf dem Gerät, enthält keinen Bibeltext (Platzhalter statt Text) – zum Weitergeben an den Entwickler
+async function euStruct(file, intro) {
+  const p = $('#eup'), say = t => { if (p) p.textContent = t; };
+  let txt;
+  try { say('Strukturbericht wird erstellt …'); txt = await EU.structReport(await file.arrayBuffer()); }
+  catch (e) { txt = 'Strukturbericht fehlgeschlagen: ' + (e && e.message || e); }
+  say('');
+  if (intro) txt = 'Meldung der App: ' + intro + '\n' + txt;
+  openDlg(`<h3>Strukturbericht</h3><p>${intro ? esc(intro) + ' ' : ''}Der Bericht beschreibt nur den Aufbau der Datei (Dateinamen, Tags, Klassen, Zahlen). Der Bibeltext ist durch Platzhalter wie [TEXT 52] ersetzt. Bitte vollständig kopieren oder als Datei speichern und weitergeben.</p><textarea readonly rows="10">${esc(txt)}</textarea><div class="row"><button class="btn" id="dcopy">Kopieren</button><button class="btn" id="dsave">Als Datei</button><button class="btn" data-close>Schließen</button></div>`, dl => {
+    $('#dcopy', dl).onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Kopiert'); } catch (e) { const ta = $('textarea', dl); ta.select(); toast('Bitte manuell kopieren'); } };
+    $('#dsave', dl).onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' })); a.download = 'epub-strukturbericht.txt'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
   });
 }
 function euReport(m) {
