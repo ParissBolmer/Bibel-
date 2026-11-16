@@ -77,10 +77,14 @@ const EU = (() => {
   /* ---------- EPUB -> Verse in EÜ-Zählung ---------- */
   // Ergebnis: { books: { ID: [{c, v: '1' | '1a', t, h?, p?}] }, diag }
   const isNum = s => /^\d{1,3}[a-z]?$/.test(s);
-  const SKIP_CLASS = /(^|\s|-|_)(fn|fu(ss|ß)note|footnote|anm|anmerkung|note|noteref|marg|rand|parallel|querverweis|xref|ref)(\s|$|-|_|\d)/i;
-  const VERSE_CLASS = /(^|\s|-|_)(v|vs|vn|vers|verse|versnr|versnum|versenumber|verseno|vno)(\s|$|-|_|\d)/i;
-  const CHAP_CLASS = /(^|\s|-|_)(k|kap|kapitel|chap|chapter|chapnum|chapternum|cn|kapnr|initial|dropcap)(\s|$|-|_|\d)/i;
+  const SKIP_CLASS = /(^|\s|-|_)(fn|fu(ss|ß)note|footnote|anm|anmerkung|note|noteref|marg|rand|parallel|querverweis|xref|ref|hide|hidden|sr-only|visually-hidden)(\s|$|-|_|\d)/i;
+  const VERSE_CLASS = /(^|\s|-|_)(v|vs|vn|vers|verse|versnr|versnum|versenumber|verseno|vno|fontx)(\s|$|-|_|\d)/i;
+  const CHAP_CLASS = /(^|\s|-|_)(k|kap|kapitel|chap|chapter|chapnum|chapternum|cn|kapnr|initial|dropcap|big)(\s|$|-|_|\d)/i;
 
+  // Einträge, die ein Buch beenden: Teil-/Abschnittstitel, Anhang – keine Seitenzahlen, keine Kapitel-Einträge
+  const isStopLabel = t => { t = String(t || '').trim(); return t.length > 2 && !/^(\d+|[ivxlc]+|kapitel\s*\d+|psalm\s*\d+|cover|titel|impressum|inhalt)$/i.test(t); };
+  // Anmerkungsabsatz: beginnt mit fett gesetzter Stellenangabe wie „2–3:“ oder „5:“
+  const isNotePara = p => { const f = p.querySelector && p.querySelector('strong, b'); if (!f) return false; const lead = (p.textContent || '').trim(); return /^\d{1,3}[a-z]?([–\-,.]\s?\d{1,3}[a-z]?)*\s?:/.test(f.textContent.trim()) && lead.startsWith(f.textContent.trim()); };
   async function readEpub(buf, progress) {
     const z = await unzip(buf);
     const cont = parseXml(await z.text('META-INF/container.xml') || '');
@@ -91,27 +95,30 @@ const EU = (() => {
     const items = {}; [...opf.getElementsByTagName('item')].forEach(i => items[i.getAttribute('id')] = { href: joinPath(base, decodeURIComponent(i.getAttribute('href'))), props: i.getAttribute('properties') || '', type: i.getAttribute('media-type') });
     const spine = [...opf.getElementsByTagName('itemref')].map(r => items[r.getAttribute('idref')]).filter(Boolean).map(i => i.href);
     // Inhaltsverzeichnis: Datei#Anker -> Buch
-    const tocStarts = [];
+    const tocStarts = [], tocOther = [];
     const navItem = Object.values(items).find(i => /\bnav\b/.test(i.props));
     if (navItem) {
       const nav = parseXml(await z.text(navItem.href)), nb = dirOf(navItem.href);
-      [...nav.getElementsByTagName('a')].forEach(a => { const id = bookIdOf(a.textContent); if (id) { const [f, h] = (a.getAttribute('href') || '').split('#'); tocStarts.push({ id, file: joinPath(nb, decodeURIComponent(f)), anchor: h || '' }); } });
+      [...nav.getElementsByTagName('a')].forEach(a => { const id = bookIdOf(a.textContent), [f, h] = (a.getAttribute('href') || '').split('#'), e = { id, file: joinPath(nb, decodeURIComponent(f)), anchor: h || '' }; if (id) tocStarts.push(e); else if (isStopLabel(a.textContent)) tocOther.push(e); });
     }
     const ncxItem = Object.values(items).find(i => i.type === 'application/x-dtbncx+xml');
     if (!tocStarts.length && ncxItem) {
       const ncx = parseXml(await z.text(ncxItem.href)), nb = dirOf(ncxItem.href);
-      [...ncx.getElementsByTagName('navPoint')].forEach(np => { const lab = np.getElementsByTagName('text')[0], src = np.getElementsByTagName('content')[0]; const id = lab && bookIdOf(lab.textContent); if (id && src) { const [f, h] = src.getAttribute('src').split('#'); tocStarts.push({ id, file: joinPath(nb, decodeURIComponent(f)), anchor: h || '' }); } });
+      [...ncx.getElementsByTagName('navPoint')].forEach(np => { const lab = np.getElementsByTagName('text')[0], src = np.getElementsByTagName('content')[0]; if (!lab || !src) return; const id = bookIdOf(lab.textContent), [f, h] = src.getAttribute('src').split('#'), e = { id, file: joinPath(nb, decodeURIComponent(f)), anchor: h || '' }; if (id) tocStarts.push(e); else if (isStopLabel(lab.textContent)) tocOther.push(e); });
     }
     const firstStart = {}; tocStarts.forEach(s => { if (!firstStart[s.id]) firstStart[s.id] = s; });
     const startsByFile = {}; Object.values(firstStart).forEach(s => (startsByFile[s.file] = startsByFile[s.file] || []).push(s));
+    // Nicht-Buch-Einträge (Teiltitel wie „DIE BÜCHER DER KÖNIGE“, Anhang) in Dateien ohne Buchanfang beenden das laufende Buch,
+    // sonst landet ihr Text im letzten Vers des vorigen Buchs
+    tocOther.forEach(s => { if (!startsByFile[s.file] || startsByFile[s.file].every(x => x.id === null)) (startsByFile[s.file] = startsByFile[s.file] || []).push({ id: null, file: s.file, anchor: s.anchor }); });
 
     const books = {}, diag = { files: spine.length, tocBooks: Object.keys(firstStart).length, classes: {}, verseMarks: 0, chapMarks: 0, notes: 0 };
     // pend: Kapitelzahl gesehen, Vers 1 beginnt mit dem nächsten Text. Text vor der ersten Kapitel-/Verszahl
     // eines Buchs (z. B. die Einleitung der EÜ) wird nicht übernommen.
     let book = null, cur = null, ch = 0, pendingH = '', newPara = false, pend = false;
     const startVerse = (c, v) => { pend = false; cur = { c, v, t: '' }; if (pendingH) { cur.h = pendingH; pendingH = ''; } if (newPara) { cur.p = 1; newPara = false; } books[book].push(cur); };
-    const addText = s => { if (!book || !s) return; if (!cur) { if (!pend || !/\S/.test(s)) return; startVerse(ch, '1'); } cur.t += s; };
-    const setBook = id => { book = id; books[book] = books[book] || []; cur = null; ch = 0; pendingH = ''; pend = false; };
+    const addText = s => { if (!book || !s) return; if (!cur) { if (!pend || !/\S/.test(s)) { if (!pend && /\S/.test(s)) pendingH = ''; return; } startVerse(ch, '1'); } cur.t += s; };   // Einleitungstext verwirft Überschriften davor
+    const setBook = id => { book = id; if (book) books[book] = books[book] || []; cur = null; ch = 0; pendingH = ''; pend = false; };
 
     for (let fi = 0; fi < spine.length; fi++) {
       if (progress) progress(`Lese Datei ${fi + 1} von ${spine.length} …`);
@@ -126,13 +133,15 @@ const EU = (() => {
           const etype = n.getAttribute('epub:type') || n.getAttributeNS && n.getAttributeNS('http://www.idpf.org/2007/ops', 'type') || '';
           if (cls) diag.classes[tag + '.' + cls] = (diag.classes[tag + '.' + cls] || 0) + 1;
           if (id && anchors.has(id)) setBook(anchors.get(id));
+          if (anchors.size && n.querySelectorAll && (/^h[1-6]$/.test(tag) || n.children.length)) for (const d of n.querySelectorAll('[id]')) { if (anchors.has(d.getAttribute('id')) && (/^h[1-6]$/.test(tag) || !n.textContent.trim())) setBook(anchors.get(d.getAttribute('id'))); }
+          if (tag === 'p' && isNotePara(n)) { diag.notes++; continue; }
           if (tag === 'script' || tag === 'style' || tag === 'aside' || /footnote|endnote|noteref|rearnote/.test(etype) || SKIP_CLASS.test(cls)) { diag.notes++; continue; }
           const txt = (n.textContent || '').replace(/\s+/g, '').replace(/[.:]$/, '');
           if (/^h[1-6]$/.test(tag)) {
             const bid = !anchors.size && bookIdOf(n.textContent);
             if (bid && (!book || bid !== book) && tag <= 'h2') { setBook(bid); continue; }
             if (/^\d{1,3}$/.test(txt) || /^(kapitel|psalm)\s*\d{1,3}$/i.test((n.textContent || '').trim())) { ch = +txt.replace(/\D/g, ''); cur = null; pend = true; diag.chapMarks++; continue; }
-            if (book && (books[book].length || pend)) { const h = (n.textContent || '').replace(/\s+/g, ' ').trim(); if (h) pendingH = pendingH ? pendingH + ' · ' + h : h; }
+            if (book) { const h = (n.textContent || '').replace(/\s+/g, ' ').trim(); if (h) pendingH = pendingH ? pendingH + ' · ' + h : h; }
             continue;
           }
           if (isNum(txt) && n.children.length === 0 && book) {
@@ -141,6 +150,7 @@ const EU = (() => {
               if (n.closest && n.closest('a') && /^[a-z*†]$/.test(txt)) { diag.notes++; continue; }
               const v = txt; if (!ch) ch = 1;
               if (v === '1' && cur && cur.c === ch && cur.v !== '1' && !CHAP_CLASS.test(cls)) ch++;   // Kapitelwechsel ohne eigene Kapitelzahl
+              if (cur && cur.c === ch && cur.v === v && !cur.t.trim()) { diag.verseMarks++; continue; }   // Kapitelzahl + Verszahl 1 direkt nacheinander
               startVerse(ch, v); diag.verseMarks++; continue;
             }
           }
@@ -342,6 +352,11 @@ const EU = (() => {
     let z = null, opfPath = null, opf = null, items = {}, spine = [], toc = [];
     add('# EPUB-Strukturbericht', 'Dateigröße: ' + buf.byteLength + ' Bytes');
 
+    await safe('0. Ergebnis des Einlesers', async () => {
+      const r = await readEpub(buf.slice(0));
+      add('Bücher erkannt: ' + Object.keys(r.books).length + ' · Versmarken: ' + r.diag.verseMarks + ' · Kapitelmarken: ' + r.diag.chapMarks + ' · übersprungen (Fußnoten o. ä.): ' + r.diag.notes);
+      Object.entries(r.books).forEach(([id, a]) => { const chs = new Set(a.map(v => v.c)); const long = a.reduce((m, v) => v.t.length > m.t.length ? v : m, a[0]); add('  ' + id + ': ' + chs.size + ' Kap., ' + a.length + ' Verse, erstes ' + a[0].c + ',' + a[0].v + ', letztes ' + a[a.length - 1].c + ',' + a[a.length - 1].v + ', längster ' + long.c + ',' + long.v + ' (' + long.t.length + ' Z.)'); });
+    });
     await safe('1. ZIP / Kopierschutz', async () => {
       const u8 = new Uint8Array(buf), dv = new DataView(buf);
       add('Signatur am Anfang: ' + [...u8.subarray(0, 4)].map(b => b.toString(16).padStart(2, '0')).join(' ') + ' (ZIP = 50 4b 03 04)');
@@ -404,7 +419,8 @@ const EU = (() => {
       const deps = {}; mine.forEach(x => deps[x.dep] = (deps[x.dep] || 0) + 1); add('Tiefen (' + src + '): ' + JSON.stringify(deps));
       add('Einträge der obersten zwei Ebenen (Titel gekürzt → erkannte Kennung · href):');
       const minDep = Math.min(...mine.map(x => x.dep));
-      mine.filter(x => x.dep <= minDep + 1).slice(0, 160).forEach(x => add('  ' + '  '.repeat(x.dep - minDep) + short(x.t, 5) + ' → ' + (bookIdOf(x.t) || '-') + ' · ' + x.href));
+      add('Davon Seitenzahl-Einträge (ausgelassen): ' + mine.filter(x => /^\s*\d+\s*$/.test(x.t)).length);
+      mine.filter(x => x.dep <= minDep + 1 && !/^\s*\d+\s*$/.test(x.t)).slice(0, 130).forEach(x => add('  ' + '  '.repeat(x.dep - minDep) + short(x.t, 5) + ' → ' + (bookIdOf(x.t) || '-') + ' · ' + x.href));
       const sub = mine.find(x => x.dep > minDep + 1); if (sub) add('Beispiel tiefere Ebene: ' + short(sub.t, 4) + ' · ' + sub.href);
       const seen = {}; mine.forEach(x => { const id = bookIdOf(x.t); if (id && !seen[id]) { seen[id] = 1; const [f, h] = x.href.split('#'); toc.push({ id, file: joinPath(x.base, decodeURIComponent(f)), anchor: h || '' }); } });
       add('Erkannte Bücher: ' + toc.length + ' – ' + toc.map(t => t.id).join(' '));
@@ -485,11 +501,6 @@ const EU = (() => {
       add('epub:type:'); top(et, 20).forEach(x => add(x));
     });
 
-    await safe('6. Ergebnis des aktuellen Parsers', async () => {
-      const r = await readEpub(buf);
-      add('Bücher erkannt: ' + Object.keys(r.books).length + ' · Versmarken: ' + r.diag.verseMarks + ' · Kapitelmarken: ' + r.diag.chapMarks + ' · übersprungen (Fußnoten o. ä.): ' + r.diag.notes);
-      Object.entries(r.books).forEach(([id, a]) => { const chs = new Set(a.map(v => v.c)); add('  ' + id + ': ' + chs.size + ' Kap., ' + a.length + ' Verse, erstes ' + a[0].c + ',' + a[0].v + ', letztes ' + a[a.length - 1].c + ',' + a[a.length - 1].v); });
-    });
     return L.join('\n');
   }
 
