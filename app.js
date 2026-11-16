@@ -109,6 +109,10 @@ const trName = code => (CAT.translations.find(t => t.code === code) || {}).name 
 const euMeta = () => EU.meta();
 const trList = () => CAT.translations.filter(t => !t.own || euMeta());
 const trEff = tr => (tr === 'eu' && !euMeta()) ? 'lut' : tr;
+// Sprachstand einer Textquelle: 'neu' = heutige Übersetzung (EÜ 2016), 'alt' = 1905–1951 (schwerer zu lesen), 'en' = Englisch
+const trAge = code => code === 'eu' ? 'neu' : code === 'ext' ? 'en' : 'alt';
+const AGE_TXT = { neu: 'heutige Übersetzung', alt: 'ältere Übersetzung, schwerer zu lesen', en: 'Englisch' };
+const ageDot = code => `<i class="age age-${trAge(code)}" title="${AGE_TXT[trAge(code)]}" aria-label="${AGE_TXT[trAge(code)]}"></i>`;
 function srcOf(book, tr = S.set.tr) {
   tr = trEff(tr);
   if (book.kind === 'c') return { url: `${tr}.json`, tr };
@@ -202,7 +206,7 @@ function bookRow(b) {
   const fn = b.chapters ? favCount(b) : 0;
   const ct = b.chapters ? `${fn ? `<span class="bfav" title="Lieblingskapitel">${I.star}${fn}</span>` : ''}${n}/${b.chapters}` : '';
   return `<a class="book ${b.chapters && n === b.chapters ? 'done' : ''}" href="${bookHref(b)}">
-    <span class="nm">${esc(b.name)}${b.sub && b.kind !== 'x' ? `<em>${esc(b.sub)}</em>` : ''}${badge}</span>
+    <span class="nm">${b.kind !== 'x' ? ageDot(srcOf(b).tr) : ''}${esc(b.name)}${b.sub && b.kind !== 'x' ? `<em>${esc(b.sub)}</em>` : ''}${badge}</span>
     <span class="ct">${ct}</span>${b.chapters ? mosaic(b) : ''}</a>`;
 }
 function viewHome() {
@@ -221,8 +225,10 @@ function viewHome() {
   html += rhythmHtml() + plansHomeHtml() + cardsHomeHtml() + pathsHomeHtml() + `<div class="shortcuts"><a href="#/plaene">${I.cal}Pläne${S.plans.length ? ' · ' + S.plans.length : ''}</a><a href="#/karten">${I.cards}Verse${S.cards.length ? ' · ' + activeCards().length : ''}</a><a href="#/wege">${I.path}Lesewege</a><a href="#/zeit">${I.time}Zeitleiste</a><a href="#/register">${I.people}Personen und Orte</a><a href="#/lieblinge">${I.star}Lieblinge${Object.keys(S.fav).length ? ' · ' + Object.keys(S.fav).length : ''}</a><a href="#/gebet">${I.pray}Gebete${openPrayers().length ? ' · ' + openPrayers().length : ''}</a></div>`;
   html += `<div class="seg" role="tablist">${SEGS.map(([k, n]) => `<button class="chip ${k === seg ? 'on' : ''}" data-seg="${k}" role="tab" aria-selected="${k === seg}">${n}</button>`).join('')}</div>`;
   html += `<div class="tally"><strong>${rd}</strong> von ${tot} Kapiteln gelesen</div><div class="bar"><i style="width:${tot ? (100 * rd / tot).toFixed(1) : 0}%"></i></div>`;
+  if (seg !== 'EXT') html += `<p class="agelegend">${ageDot('eu')}heutige Übersetzung (EÜ 2016)<br>${ageDot('lut')}ältere Übersetzung (1905–1951), schwerer zu lesen${euMeta() ? '' : '<br><span class="muted">Mit der Einheitsübersetzung (Mehr → Einheitsübersetzung) werden die Bücher grün.</span>'}</p>`;
   if (seg === 'APO') {
-    html += `<p class="grpdesc">${esc(CAT.apoIntro)}</p>` + books.map(bookRow).join('');
+    const apoTxt = euMeta() ? CAT.apoIntro.replace(/Text hier: Menge-Bibel 1939\.?/, 'Text hier: Einheitsübersetzung (Gebet Manasses: Menge-Bibel 1939).') : CAT.apoIntro;
+    html += `<p class="grpdesc">${esc(apoTxt)}</p>` + books.map(bookRow).join('');
   } else if (seg === 'EXT') {
     html += `<p class="grpdesc">Schriften aus dem Umfeld der Bibel, die aus unterschiedlichen Gründen nicht in den Kanon aufgenommen wurden. Jede Schrift hat eine kurze Einführung: worum es geht, wann sie entstand und warum sie draußen blieb. Die Texte liegen in gemeinfreien <b>englischen</b> Übersetzungen vor – gemeinfreie deutsche waren nicht greifbar.</p>`;
     CAT.extraGroups.forEach((g, gi) => {
@@ -296,7 +302,7 @@ function verseHtml(book, ch, i, text) {
   // Worterklärungen {…} werden zum Symbol, HERR wird zu Herr in Kapitälchen
   const parts = text.split(/(\{[^}]*\})/);
   const plain = s => esc(s).replace(/\bHERR(N?)\b/g, (m, n) => `H<span class="sc">err${n ? 'n' : ''}</span>`);
-  const eids = entIds(book, ch, v);   // antippbare Namen (Einstellung „Namen im Text“, nur Luther 1912)
+  const eids = entIds(book, ch, v);   // antippbare Namen (Einstellung „Namen im Text“, Luther 1912 und EÜ)
   const t = parts.map((seg, i) => {
     if (seg.startsWith('{') && seg.endsWith('}')) return `<button class="fnm" data-fn="${esc(seg.slice(1, -1))}" aria-label="Worterklärung">${I.fn}</button>`;
     const s2 = parts[i + 1] && parts[i + 1].startsWith('{') ? seg.replace(/\s+$/, '') : seg;
@@ -320,7 +326,8 @@ async function viewReader(book, ch, focusV, focusV2, ctx) {
   const src = srcOf(book);
   if (book.kind === 'x') await loadExtDe();
   const deBook = book.kind === 'x' && EXTDE && EXTDE.books[book.id] || null;
-  const trBtn = book.kind === 'c' ? `<button class="chip" id="trbtn" aria-label="Übersetzung wechseln">${esc(trName(src.tr))}</button>`
+  const trBtn = book.kind === 'c' ? `<button class="chip" id="trbtn" aria-label="Übersetzung wechseln">${ageDot(src.tr)}${esc(trName(src.tr))}</button>`
+    : book.kind === 'a' ? `<span class="chip">${ageDot(src.tr)}${esc(trName(src.tr))}</span>`
     : deBook ? `<button class="chip" id="xdebtn" aria-label="Sprache wechseln: ${S.set.xde ? 'Deutsch (KI-Übertragung)' : 'Englisch'}">${S.set.xde ? 'Deutsch (KI)' : 'English'}</button>` : '';
   setTop(`<a class="iconbtn" href="${bookHref(book)}" aria-label="Kapitelübersicht">${I.grid}</a>
     <h1><button id="chpick" aria-label="Kapitel wählen">${esc(book.name)}${/^\d+$/.test(chLabel(book, ch)) ? ' ' + ch : ''}</button></h1>${trBtn}
@@ -330,7 +337,7 @@ async function viewReader(book, ch, focusV, focusV2, ctx) {
   try { chapters = await chaptersOf(book); }
   catch (e) { view.innerHTML = `<div class="missing">Der Text konnte nicht geladen werden. Bist du offline? Lade die Übersetzung unter „Mehr → Offline speichern“, solange du online bist.</div>`; return; }
   const nCh = chapters.length;
-  const entOK = book.kind === 'c' && src.tr === 'lut';   // Register: nur kanonische Bücher in Luther-1912-Zählung
+  const entOK = book.kind === 'c' && (src.tr === 'lut' || src.tr === 'eu');   // Register: kanonische Bücher in Luther-1912-Zählung (EÜ ist darauf umgerechnet)
   if (entOK && S.set.ents) { try { await loadReg(); } catch (e) { /* ohne Register einfach ohne Namenslinks */ } }
   if (ch > nCh) ch = nCh;
   let C = chapters[ch - 1];
@@ -362,7 +369,7 @@ async function viewReader(book, ch, focusV, focusV2, ctx) {
     return pre + verseHtml(book, ch, i, t);
   }).join('');
   const euDiff = C.e ? C.e.map((e, i) => e && e !== '↑' && e !== `${ch},${i + 1}` ? `V. ${i + 1} = ${e}` : '').filter(Boolean) : [];
-  html += `<div class="chend">${book.kind === 'a' ? `<p class="trnote" style="margin:0">Text: ${esc(trName(src.tr))}</p>` : ''}
+  html += `<div class="chend">${book.kind === 'a' ? `<p class="trnote" style="margin:0">Text: ${ageDot(src.tr)}${esc(trName(src.tr))}</p>` : ''}
     ${euDiff.length ? `<p class="trnote" style="margin:0">Verszahlen wie Luther 1912, damit Markierungen passen. In der Einheitsübersetzung: ${esc(euDiff.slice(0, 6).join(' · '))}${euDiff.length > 6 ? ` … (${euDiff.length} Verse)` : ''}</p>` : ''}
     <button class="btn hidden" id="chreg"></button>
     <button class="btn ${isRead ? 'done' : 'pri'}" id="markread">${I.check}${isRead ? 'Gelesen – rückgängig machen' : PC ? (PC.i < PC.chs.length - 1 ? 'Gelesen – weiter im Plan' : 'Gelesen – Tag abschließen') : 'Kapitel als gelesen markieren'}</button>
@@ -459,7 +466,7 @@ function chapterPicker(book) {
   });
 }
 function trDialog(after) {
-  openDlg(`<h3>Übersetzung</h3><div class="taglist">${trList().map(t => `<label><input type="radio" name="tr" value="${t.code}" ${t.code === S.set.tr ? 'checked' : ''}><span>${esc(t.name)}<br><small class="muted">${esc(t.long)}</small></span></label>`).join('')}</div><p class="muted">Markierungen und Notizen hängen am Vers, nicht an der Übersetzung. Die Elberfelder zählt einige Verse anders (z. B. Maleachi 4).</p><div class="row"><button class="btn" data-close>Fertig</button></div>`, d => {
+  openDlg(`<h3>Übersetzung</h3><div class="taglist">${trList().map(t => `<label><input type="radio" name="tr" value="${t.code}" ${t.code === S.set.tr ? 'checked' : ''}><span>${ageDot(t.code)}${esc(t.name)}<br><small class="muted">${esc(t.long)}</small></span></label>`).join('')}</div><p class="muted">Markierungen und Notizen hängen am Vers, nicht an der Übersetzung. Die Elberfelder zählt einige Verse anders (z. B. Maleachi 4).</p><div class="row"><button class="btn" data-close>Fertig</button></div>`, d => {
     $$('input[name=tr]', d).forEach(i => i.onchange = () => { S.set.tr = i.value; save(); dlg.close(); after && after(); });
   });
 }
@@ -470,7 +477,7 @@ function displayDialog() {
     <div class="set"><h3>Verse</h3><div class="opts"><button class="chip ${!S.set.oneper ? 'on' : ''}" data-op="0">Fließtext</button><button class="chip ${S.set.oneper ? 'on' : ''}" data-op="1">Jeder Vers neue Zeile</button></div></div>
     <div class="set"><h3>Versnummern</h3><div class="opts">${[['dezent', 'Dezent'], ['normal', 'Kräftig'], ['aus', 'Aus']].map(([v, n]) => `<button class="chip ${(S.set.vnum || 'dezent') === v ? 'on' : ''}" data-vn="${v}">${n}</button>`).join('')}</div></div>
     <div class="set"><h3>Satz</h3><div class="opts"><button class="chip ${!S.set.just ? 'on' : ''}" data-ju="0">Linksbündig</button><button class="chip ${S.set.just ? 'on' : ''}" data-ju="1">Blocksatz</button><button class="chip ${S.set.wide ? 'on' : ''}" data-wi="${S.set.wide ? 0 : 1}">Breite Ränder</button></div></div>
-    <div class="set"><h3>Namen im Text</h3><div class="opts"><button class="chip ${!S.set.ents ? 'on' : ''}" data-en="0">Aus</button><button class="chip ${S.set.ents ? 'on' : ''}" data-en="1">Antippbar</button></div><p class="muted" style="font-size:12.5px;margin:6px 0 0">Personen und Orte werden dezent unterstrichen; ein Tippen zeigt eine Kurzbeschreibung. Nur in Luther 1912.</p></div>
+    <div class="set"><h3>Namen im Text</h3><div class="opts"><button class="chip ${!S.set.ents ? 'on' : ''}" data-en="0">Aus</button><button class="chip ${S.set.ents ? 'on' : ''}" data-en="1">Antippbar</button></div><p class="muted" style="font-size:12.5px;margin:6px 0 0">Personen und Orte werden dezent unterstrichen; ein Tippen zeigt eine Kurzbeschreibung. In Luther 1912 und der Einheitsübersetzung – dort nur, wo der Name gleich geschrieben ist (also z. B. nicht bei „Hesekiel“/„Ezechiel“).</p></div>
     <div class="set"><h3>Design</h3><div class="opts">${[['auto', 'Automatisch'], ['light', 'Hell'], ['sepia', 'Sepia'], ['dark', 'Dunkel']].map(([v, n]) => `<button class="chip ${S.set.theme === v ? 'on' : ''}" data-th="${v}">${n}</button>`).join('')}</div></div>
     <div class="row"><button class="btn" data-close>Fertig</button></div>`, d => {
     const re = () => { save(); applySettings(); displayDialog(); if (R && location.hash.startsWith('#/r/')) rerenderReader(); };
@@ -779,7 +786,7 @@ function viewMore() {
     <p>Gelesene Kapitel der letzten 18 Wochen</p>${heatmap(m)}</div>
   <div class="set"><h3>Lesen und Beten</h3><div class="opts"><a class="btn" href="#/plaene">${I.cal}Lesepläne</a><a class="btn" href="#/karten">${I.cards}Verskarten</a><a class="btn" href="#/wege">${I.path}Lesewege</a><a class="btn" href="#/lieblinge">${I.star}Lieblinge</a><a class="btn" href="#/gebet">${I.pray}Gebetsliste</a></div></div>
   <div class="set"><h3>Nachschlagen</h3><div class="opts"><a class="btn" href="#/zeit">${I.time}Zeitleiste</a><a class="btn" href="#/register">${I.people}Personen und Orte</a></div></div>
-  <div class="set"><h3>Übersetzung</h3><div class="opts">${trList().map(t => `<button class="chip ${t.code === trEff(S.set.tr) ? 'on' : ''}" data-tr="${t.code}">${esc(t.name)}</button>`).join('')}</div>
+  <div class="set"><h3>Übersetzung</h3><div class="opts">${trList().map(t => `<button class="chip ${t.code === trEff(S.set.tr) ? 'on' : ''}" data-tr="${t.code}">${ageDot(t.code)}${esc(t.name)}</button>`).join('')}</div>
     <p>Apokryphen werden in Menge angezeigt; mit der Einheitsübersetzung in der EÜ (außer Gebet Manasses).</p></div>
   ${euSection()}
   <div class="set"><h3>Darstellung</h3><div class="opts"><button class="btn" id="disp">${I.aa}Schrift, Abstand, Design</button></div></div>

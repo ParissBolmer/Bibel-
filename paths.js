@@ -97,6 +97,6 @@ async function viewStation(id, num) {
     const chs = await chaptersOf(book), C = chs[s.c - 1];
     const box = $('#sttext'); if (!box) return;
     const vs = []; for (let v = s.v1; v <= s.v2; v++) if (C.v[v - 1]) vs.push(`<span class="sv"><sup>${v}</sup>${esc(cleanVerse(C.v[v - 1])).replace(/\bHERR(N?)\b/g, (m, n) => `H<span class="sc">err${n ? 'n' : ''}</span>`)}</span>`);
-    box.innerHTML = `<div class="st-ref">${esc(stRef(s))} <span>· ${esc(trName(srcOf(book).tr))}</span></div><p class="st-v">${vs.join(' ')}</p>`;
+    box.innerHTML = `<div class="st-ref">${esc(stRef(s))} <span>· ${ageDot(srcOf(book).tr)}${esc(trName(srcOf(book).tr))}</span></div><p class="st-v">${vs.join(' ')}</p>`;
   } catch (e) { const box = $('#sttext'); if (box) box.innerHTML = `<div class="st-ref">${esc(stRef(s))}</div><p class="muted">Text nicht verfügbar (offline?). Lade die Übersetzung unter „Mehr → Offline speichern“.</p>`; }
 }

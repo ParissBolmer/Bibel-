@@ -57,15 +57,17 @@ function entSplit(seg, ids) {
   if (pos < seg.length) out.push({ t: seg.slice(pos) });
   return out;
 }
-// Registereinträge, die in diesem Vers stehen (nur Luther 1912, nur kanonische Bücher)
-const entIds = (book, ch, v) => REG && book.kind === 'c' && S.set.tr === 'lut' && S.set.ents ? REG.vidx.get(book.key + '.' + ch + '.' + v) : null;
+// Registereinträge, die in diesem Vers stehen (Luther 1912 und EÜ – beide in Luther-Zählung –, nur kanonische Bücher).
+// Gefunden wird ein Name nur, wenn er im angezeigten Text so geschrieben steht wie im Register.
+const regTr = () => ['lut', 'eu'].includes(trEff(S.set.tr));
+const entIds = (book, ch, v) => REG && book.kind === 'c' && regTr() && S.set.ents ? REG.vidx.get(book.key + '.' + ch + '.' + v) : null;
 
 function entDialog(id) {
   const e = REG && REG.by[id]; if (!e) return;
   openDlg(`<h3>${esc(e.n)}</h3><p class="muted" style="margin:-4px 0 8px">${esc(regSub(e))}${e.a ? ' · auch: ' + esc(e.a) : ''}</p><p>${esc(e.d)}</p>
     <div class="row"><a class="btn pri" href="#/reg/${esc(e.i)}">Eintrag öffnen</a><button class="btn" data-close>Schließen</button></div>`);
 }
-function chRegCount(book, ch) { return REG && book.kind === 'c' && S.set.tr === 'lut' ? (REG.cidx.get(book.key + '.' + ch) || new Set()).size : 0; }
+function chRegCount(book, ch) { return REG && book.kind === 'c' && regTr() ? (REG.cidx.get(book.key + '.' + ch) || new Set()).size : 0; }
 function chRegDialog(book, ch) {
   const ids = [...(REG.cidx.get(book.key + '.' + ch) || [])].map(i => REG.by[i]).sort((a, b) => a.nn.localeCompare(b.nn));
   const row = e => `<a class="planrow" href="#/reg/${esc(e.i)}"><span class="pr-t"><b>${esc(e.n)}</b><span>${esc(e.d)}</span></span></a>`;

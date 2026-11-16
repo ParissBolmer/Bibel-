@@ -125,7 +125,7 @@ function chunks(card) {
 }
 
 /* ---------- Anlegen ---------- */
-function cardTr(book) { return book.kind === 'c' ? S.set.tr : book.kind === 'a' ? 'men' : 'ext'; }
+function cardTr(book) { return srcOf(book).tr; }   // tatsächlich angezeigte Quelle (EÜ auch für Spätschriften)
 function addCard(book, ch, v1, v2, texts, tr) {
   v2 = v2 && v2 > v1 ? v2 : 0;
   const ex = S.cards.find(c => c.b === book.key && c.c === ch && c.v1 === v1 && (c.v2 || 0) === v2 && c.tr === tr && !c.pause);
