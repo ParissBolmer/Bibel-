@@ -919,7 +919,8 @@ async function euImport(file) {
 async function euStruct(file, intro) {
   const p = $('#eup'), say = t => { if (p) p.textContent = t; };
   let txt;
-  try { say('Strukturbericht wird erstellt …'); txt = await EU.structReport(await file.arrayBuffer()); }
+  try { say('Strukturbericht wird erstellt …'); let ref = null; try { const [lut, men] = await Promise.all([loadJSON('lut.json'), loadJSON('men.json')]); ref = { lut, men }; } catch (e) {}
+    txt = await EU.structReport(await file.arrayBuffer(), ref); }
   catch (e) { txt = 'Strukturbericht fehlgeschlagen: ' + (e && e.message || e); }
   say('');
   if (intro) txt = 'Meldung der App: ' + intro + '\n' + txt;

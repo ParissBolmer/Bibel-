@@ -85,6 +85,25 @@ const EU = (() => {
   const isStopLabel = t => { t = String(t || '').trim(); return t.length > 2 && !/^(\d+|[ivxlc]+|kapitel\s*\d+|psalm\s*\d+|cover|titel|impressum|inhalt)$/i.test(t); };
   // Anmerkungsabsatz: beginnt mit fett gesetzter Stellenangabe wie „2–3:“ oder „5:“
   const isNotePara = p => { const f = p.querySelector && p.querySelector('strong, b'); if (!f) return false; const lead = (p.textContent || '').trim(); return /^\d{1,3}[a-z]?([–\-,.]\s?\d{1,3}[a-z]?)*\s?:/.test(f.textContent.trim()) && lead.startsWith(f.textContent.trim()); };
+  // Umfeld eines Elements: nächster Block (p/div/li/h*), Text durch [n] ersetzt, kurze Zahlen bleiben, Fundstelle in ⟦ ⟧
+  function ctxOf(hit) {
+    let blk = hit; while (blk.parentNode && blk.parentNode.nodeType === 1 && !/^(p|div|li|h[1-6]|td|body)$/.test(blk.localName)) blk = blk.parentNode;
+    const prev = blk.previousElementSibling;
+    const ser = (el, depth) => {
+      let out = '';
+      for (const c of el.childNodes) {
+        if (out.length > 260) return out + '…';
+        if (c.nodeType === 3) { const t = c.nodeValue; if (!/\S/.test(t)) continue; out += /^[\s\d.,:;–\-()a-z*†]{0,8}$/i.test(t) && /\d|^\s*[a-z*†]\s*$/i.test(t) ? JSON.stringify(t.trim()) : '[' + t.trim().length + ']'; continue; }
+        if (c.nodeType !== 1) continue;
+        const cl = c.getAttribute('class'), et = c.getAttribute('epub:type'), tag = c.localName + (cl ? '.' + cl.replace(/\s+/g, '.') : '') + (et ? '[' + et + ']' : '');
+        const inner = depth < 6 ? ser(c, depth + 1) : '…';
+        out += (c === hit ? '⟦' : '') + '<' + tag + '>' + inner + '</>' + (c === hit ? '⟧' : '');
+      }
+      return out;
+    };
+    const head = el => el ? '<' + el.localName + (el.getAttribute('class') ? '.' + el.getAttribute('class') : '') + '>' : '';
+    return (prev ? 'davor ' + head(prev) + ' · ' : '') + head(blk) + ' ' + ser(blk, 0);
+  }
   async function readEpub(buf, progress) {
     const z = await unzip(buf);
     const cont = parseXml(await z.text('META-INF/container.xml') || '');
@@ -112,11 +131,13 @@ const EU = (() => {
     // sonst landet ihr Text im letzten Vers des vorigen Buchs
     tocOther.forEach(s => { if (!startsByFile[s.file] || startsByFile[s.file].every(x => x.id === null)) (startsByFile[s.file] = startsByFile[s.file] || []).push({ id: null, file: s.file, anchor: s.anchor }); });
 
-    const books = {}, diag = { files: spine.length, tocBooks: Object.keys(firstStart).length, classes: {}, verseMarks: 0, chapMarks: 0, notes: 0 };
+    const books = {}, diag = { files: spine.length, tocBooks: Object.keys(firstStart).length, classes: {}, verseMarks: 0, chapMarks: 0, notes: 0, jumps: [] };
     // pend: Kapitelzahl gesehen, Vers 1 beginnt mit dem nächsten Text. Text vor der ersten Kapitel-/Verszahl
     // eines Buchs (z. B. die Einleitung der EÜ) wird nicht übernommen.
     let book = null, cur = null, ch = 0, pendingH = '', newPara = false, pend = false;
     const startVerse = (c, v) => { pend = false; cur = { c, v, t: '' }; if (pendingH) { cur.h = pendingH; pendingH = ''; } if (newPara) { cur.p = 1; newPara = false; } books[book].push(cur); };
+    // Unerwartete Kapitel-/Versnummer festhalten, mit Umfeld ohne Text (für den Strukturbericht)
+    const jump = (n, what) => { if (!book) return; const per = diag.jumps.filter(j => j.b === book).length; if (per < 4 && diag.jumps.length < 120) diag.jumps.push({ b: book, what, ctx: ctxOf(n) }); };
     const addText = s => { if (!book || !s) return; if (!cur) { if (!pend || !/\S/.test(s)) { if (!pend && /\S/.test(s)) pendingH = ''; return; } startVerse(ch, '1'); } cur.t += s; };   // Einleitungstext verwirft Überschriften davor
     const setBook = id => { book = id; if (book) books[book] = books[book] || []; cur = null; ch = 0; pendingH = ''; pend = false; };
 
@@ -145,12 +166,13 @@ const EU = (() => {
             continue;
           }
           if (isNum(txt) && n.children.length === 0 && book) {
-            if (CHAP_CLASS.test(cls) && !VERSE_CLASS.test(cls)) { ch = parseInt(txt, 10); startVerse(ch, '1'); diag.chapMarks++; continue; }
+            if (CHAP_CLASS.test(cls) && !VERSE_CLASS.test(cls)) { const nc = parseInt(txt, 10); if (nc !== ch + 1) jump(n, 'Kapitel ' + ch + ' → ' + nc); ch = nc; startVerse(ch, '1'); diag.chapMarks++; continue; }
             if (tag === 'sup' || VERSE_CLASS.test(cls)) {
               if (n.closest && n.closest('a') && /^[a-z*†]$/.test(txt)) { diag.notes++; continue; }
               const v = txt; if (!ch) ch = 1;
               if (v === '1' && cur && cur.c === ch && cur.v !== '1' && !CHAP_CLASS.test(cls)) ch++;   // Kapitelwechsel ohne eigene Kapitelzahl
               if (cur && cur.c === ch && cur.v === v && !cur.t.trim()) { diag.verseMarks++; continue; }   // Kapitelzahl + Verszahl 1 direkt nacheinander
+              if (cur && cur.c === ch && parseInt(v, 10) !== parseInt(cur.v, 10) + 1 && parseInt(v, 10) !== parseInt(cur.v, 10)) jump(n, 'Vers ' + ch + ',' + cur.v + ' → ' + ch + ',' + v);
               startVerse(ch, v); diag.verseMarks++; continue;
             }
           }
@@ -344,7 +366,7 @@ const EU = (() => {
   /* ---------- Strukturbericht (läuft nur lokal, enthält keinen Fließtext) ---------- */
   // Text wird durch [TEXT n] ersetzt; erhalten bleiben nur Tags, Attribute, Dateinamen, kurze Zahlen
   // (Vers-/Kapitelnummern) und die ersten 3 Wörter von Überschriften bzw. Inhaltsverzeichnis-Einträgen.
-  async function structReport(buf) {
+  async function structReport(buf, ref) {
     const L = [], sec = t => L.push('', '## ' + t), add = (...s) => L.push(...s);
     const short = (s, n = 3) => { const w = String(s || '').replace(/\s+/g, ' ').trim().split(' '); return w.slice(0, n).join(' ') + (w.length > n ? ' …' : ''); };
     const keepTxt = s => /^[\s\d.,:;–\-—()\[\]a-z*†]{0,8}$/i.test(s) && /\d|^\s*[a-z*†]\s*$/i.test(s);
@@ -354,6 +376,19 @@ const EU = (() => {
 
     await safe('0. Ergebnis des Einlesers', async () => {
       const r = await readEpub(buf.slice(0));
+      if (ref) {   // Verszahlen je Kapitel mit der App vergleichen (Kanon: Luther, Spätschriften: Menge)
+        add('Kapitel mit anderer Verszahl als in der App (EÜ/App):');
+        Object.entries(r.books).forEach(([id, a]) => {
+          const tgt = ref.lut[id] || ref.men[id]; if (!tgt) return;
+          const cnt = {}; a.forEach(v => { if (!/[a-z]$/.test(v.v)) cnt[v.c] = Math.max(cnt[v.c] || 0, parseInt(v.v, 10)); });
+          const diff = []; const nC = Math.max(tgt.length, ...Object.keys(cnt).map(Number));
+          for (let c = 1; c <= nC; c++) { const e = cnt[c] || 0, t = (tgt[c - 1] || []).length; if (e !== t) diff.push(c + ':' + e + '/' + t); }
+          if (diff.length) add('  ' + id + ' (' + diff.length + '): ' + diff.slice(0, 14).join(' ') + (diff.length > 14 ? ' …' : ''));
+        });
+      }
+      add('Unerwartete Nummern (je Buch höchstens 4), Fundstelle in ⟦ ⟧, [n] = Text mit n Zeichen:');
+      r.diag.jumps.forEach(j => add('  ' + j.b + ' ' + j.what + ' :: ' + j.ctx));
+      add('Bücher im Einzelnen:');
       add('Bücher erkannt: ' + Object.keys(r.books).length + ' · Versmarken: ' + r.diag.verseMarks + ' · Kapitelmarken: ' + r.diag.chapMarks + ' · übersprungen (Fußnoten o. ä.): ' + r.diag.notes);
       Object.entries(r.books).forEach(([id, a]) => { const chs = new Set(a.map(v => v.c)); const long = a.reduce((m, v) => v.t.length > m.t.length ? v : m, a[0]); add('  ' + id + ': ' + chs.size + ' Kap., ' + a.length + ' Verse, erstes ' + a[0].c + ',' + a[0].v + ', letztes ' + a[a.length - 1].c + ',' + a[a.length - 1].v + ', längster ' + long.c + ',' + long.v + ' (' + long.t.length + ' Z.)'); });
     });
