@@ -87,6 +87,7 @@ async function loadExtDe() {
 const deOf = (book, ch) => (EXTDE && EXTDE.books[book.id] && EXTDE.books[book.id].ch[ch - 1]) || null;
 async function loadJSON(url) {
   if (fileCache.has(url)) return fileCache.get(url);
+  if (url === EU.URL) { const p = EU.load(); fileCache.set(url, p); try { return await p; } catch (e) { fileCache.delete(url); throw e; } }
   const p = fetch(url).then(r => {
     if (!r.ok) throw new Error(r.status);
     // Solange der Service Worker die Seite noch nicht steuert (erster Besuch), selbst in den Offline-Speicher legen
@@ -104,9 +105,14 @@ function indexCatalog() {
   Refs.init([...CAT.canon, ...CAT.apo, ...CAT.extra]);
 }
 const trName = code => (CAT.translations.find(t => t.code === code) || {}).name || code;
+// Eigene Übersetzung (EÜ): nur verfügbar, wenn auf diesem Gerät importiert. Sonst gilt Luther.
+const euMeta = () => EU.meta();
+const trList = () => CAT.translations.filter(t => !t.own || euMeta());
+const trEff = tr => (tr === 'eu' && !euMeta()) ? 'lut' : tr;
 function srcOf(book, tr = S.set.tr) {
+  tr = trEff(tr);
   if (book.kind === 'c') return { url: `${tr}.json`, tr };
-  if (book.kind === 'a') return { url: 'men.json', tr: 'men' };
+  if (book.kind === 'a') { const m = tr === 'eu' && euMeta(); return m && m.books.includes(book.id) ? { url: EU.URL, tr: 'eu' } : { url: 'men.json', tr: 'men' }; }
   return { url: 'ext.json', tr: 'ext' };
 }
 async function chaptersOf(book, tr) {
@@ -348,8 +354,16 @@ async function viewReader(book, ch, focusV, focusV2, ctx) {
   if (DE) html += `<div class="kinote" role="note"><b>KI-Übertragung aus dem Englischen</b> – keine geprüfte Übersetzung. Grundlage ist die englische Fassung (${esc(deBook.base)}), nicht der Urtext. Fehler sind möglich. <a href="#/quellen">Mehr dazu</a></div>`;
   else if (book.kind === 'x') html += `<p class="trnote">Englischer Text · ${esc(book.tr)}${deBook && S.set.xde ? ' · für dieses Kapitel gibt es keine deutsche Übertragung' : ''}</p>`;
   if (book.kind === 'a') html += '';
-  html += C.v.map((t, i) => !t ? '' : verseHtml(book, ch, i, t)).join('');
-  html += `<div class="chend">${book.kind === 'a' ? '<p class="trnote" style="margin:0">Text: Menge 1939</p>' : ''}
+  html += C.v.map((t, i) => {
+    let pre = '';
+    if (C.hs && C.hs[i]) pre += `<span class="peri">${esc(C.hs[i])}</span>`;
+    else if (C.p && i && C.p.includes(i)) pre += '<span class="pbr"></span>';
+    if (!t) return C.e ? pre + `<span class="v vgap" data-v="${i + 1}" id="v${i + 1}"><sup>${i + 1}</sup><span class="muted">${C.e[i] === '↑' ? '(im Vers davor enthalten)' : '(in der EÜ nicht enthalten)'}</span></span> ` : '';
+    return pre + verseHtml(book, ch, i, t);
+  }).join('');
+  const euDiff = C.e ? C.e.map((e, i) => e && e !== '↑' && e !== `${ch},${i + 1}` ? `V. ${i + 1} = ${e}` : '').filter(Boolean) : [];
+  html += `<div class="chend">${book.kind === 'a' ? `<p class="trnote" style="margin:0">Text: ${esc(trName(src.tr))}</p>` : ''}
+    ${euDiff.length ? `<p class="trnote" style="margin:0">Verszahlen wie Luther 1912, damit Markierungen passen. In der Einheitsübersetzung: ${esc(euDiff.slice(0, 6).join(' · '))}${euDiff.length > 6 ? ` … (${euDiff.length} Verse)` : ''}</p>` : ''}
     <button class="btn hidden" id="chreg"></button>
     <button class="btn ${isRead ? 'done' : 'pri'}" id="markread">${I.check}${isRead ? 'Gelesen – rückgängig machen' : PC ? (PC.i < PC.chs.length - 1 ? 'Gelesen – weiter im Plan' : 'Gelesen – Tag abschließen') : 'Kapitel als gelesen markieren'}</button>
     <div class="toggle-row" style="justify-content:space-between">
@@ -445,7 +459,7 @@ function chapterPicker(book) {
   });
 }
 function trDialog(after) {
-  openDlg(`<h3>Übersetzung</h3><div class="taglist">${CAT.translations.map(t => `<label><input type="radio" name="tr" value="${t.code}" ${t.code === S.set.tr ? 'checked' : ''}><span>${esc(t.name)}<br><small class="muted">${esc(t.long)}</small></span></label>`).join('')}</div><p class="muted">Markierungen und Notizen hängen am Vers, nicht an der Übersetzung. Die Elberfelder zählt einige Verse anders (z. B. Maleachi 4).</p><div class="row"><button class="btn" data-close>Fertig</button></div>`, d => {
+  openDlg(`<h3>Übersetzung</h3><div class="taglist">${trList().map(t => `<label><input type="radio" name="tr" value="${t.code}" ${t.code === S.set.tr ? 'checked' : ''}><span>${esc(t.name)}<br><small class="muted">${esc(t.long)}</small></span></label>`).join('')}</div><p class="muted">Markierungen und Notizen hängen am Vers, nicht an der Übersetzung. Die Elberfelder zählt einige Verse anders (z. B. Maleachi 4).</p><div class="row"><button class="btn" data-close>Fertig</button></div>`, d => {
     $$('input[name=tr]', d).forEach(i => i.onchange = () => { S.set.tr = i.value; save(); dlg.close(); after && after(); });
   });
 }
@@ -524,7 +538,7 @@ function clearSel() { if (R) R.sel.clear(); $$('.v.sel', view).forEach(el => el.
 function closeSheet() { sheet.classList.remove('open'); }
 async function copyOut(share) {
   const { ref } = selRange();
-  const t = `„${selText()}“ – ${ref} (${R.book.kind === 'c' ? trName(S.set.tr) : R.book.kind === 'a' ? 'Menge 1939' : R.book.tr})`;
+  const t = `„${selText()}“ – ${ref} (${R.book.kind === 'x' ? R.book.tr : trName(srcOf(R.book).tr)})`;
   if (share && navigator.share) { try { await navigator.share({ text: t }); } catch (e) {} return; }
   try { await navigator.clipboard.writeText(t); toast('Kopiert'); } catch (e) { openDlg(`<h3>Text</h3><textarea readonly>${esc(t)}</textarea><div class="row"><button class="btn" data-close>Schließen</button></div>`); }
 }
@@ -629,7 +643,7 @@ function viewMarks() {
 let searchState = { q: '', scope: 'BIB', results: null, token: 0 };
 function viewSearch() {
   setTab('search'); setBodyKind('c');
-  setTop(`<h1>Suche <small>${esc(trName(S.set.tr))}</small></h1>`);
+  setTop(`<h1>Suche <small>${esc(trName(trEff(S.set.tr)))}</small></h1>`);
   const scopes = [['BIB', 'Bibel'], ['AT', 'AT'], ['NT', 'NT'], ['APO', 'Apokryphen'], ['EXT', 'Außerkanonisch (EN)']];
   view.innerHTML = `<form class="searchbox" id="sf"><input type="search" id="q" placeholder="Wort oder Satzteil, z. B. Barmherzigkeit" value="${esc(searchState.q)}" enterkeyhint="search" autocomplete="off"><button class="btn pri">Suchen</button></form>
     <div class="filters">${scopes.map(([k, n]) => `<button class="chip ${k === searchState.scope ? 'on' : ''}" data-s="${k}">${n}</button>`).join('')}</div>
@@ -765,14 +779,15 @@ function viewMore() {
     <p>Gelesene Kapitel der letzten 18 Wochen</p>${heatmap(m)}</div>
   <div class="set"><h3>Lesen und Beten</h3><div class="opts"><a class="btn" href="#/plaene">${I.cal}Lesepläne</a><a class="btn" href="#/karten">${I.cards}Verskarten</a><a class="btn" href="#/wege">${I.path}Lesewege</a><a class="btn" href="#/lieblinge">${I.star}Lieblinge</a><a class="btn" href="#/gebet">${I.pray}Gebetsliste</a></div></div>
   <div class="set"><h3>Nachschlagen</h3><div class="opts"><a class="btn" href="#/zeit">${I.time}Zeitleiste</a><a class="btn" href="#/register">${I.people}Personen und Orte</a></div></div>
-  <div class="set"><h3>Übersetzung</h3><div class="opts">${CAT.translations.map(t => `<button class="chip ${t.code === S.set.tr ? 'on' : ''}" data-tr="${t.code}">${esc(t.name)}</button>`).join('')}</div>
-    <p>Apokryphen gibt es nur in der Menge-Bibel; sie werden immer in Menge angezeigt.</p></div>
+  <div class="set"><h3>Übersetzung</h3><div class="opts">${trList().map(t => `<button class="chip ${t.code === trEff(S.set.tr) ? 'on' : ''}" data-tr="${t.code}">${esc(t.name)}</button>`).join('')}</div>
+    <p>Apokryphen werden in Menge angezeigt; mit der Einheitsübersetzung in der EÜ (außer Gebet Manasses).</p></div>
+  ${euSection()}
   <div class="set"><h3>Darstellung</h3><div class="opts"><button class="btn" id="disp">${I.aa}Schrift, Abstand, Design</button></div></div>
   <div class="set"><h3>Themen</h3>${tagIds.length ? tagIds.map(id => `<div class="tagrow"><span class="dot" style="background:${TAG_COLORS[S.tags[id].c]}"></span><span>${esc(S.tags[id].n)}</span><button class="btn" data-edit="${id}">Bearbeiten</button></div>`).join('') : '<p>Themen legst du beim Markieren eines Verses an.</p>'}</div>
   <div class="set"><h3>Sichern</h3><p>Alle Lesefortschritte, Markierungen, Themen, Notizen, Lieblinge, Lesepläne, Gebete, Verskarten und Lesewege liegen nur auf diesem Gerät. Exportiere regelmäßig eine Sicherung – z. B. bevor du Browserdaten löschst.</p>
     <div class="opts"><button class="btn" id="exp">Sicherung exportieren</button><button class="btn" id="imp">Sicherung importieren</button><input type="file" id="impf" accept="application/json,.json" class="hidden"></div></div>
   <div class="set"><h3>Offline speichern</h3><p>Jede Übersetzung wird beim ersten Öffnen komplett geladen (ca. 1,5 MB Download) und ist danach offline verfügbar. Hier kannst du weitere vorab laden.</p>
-    <div class="opts">${CAT.translations.map(t => `<button class="btn" data-dl="${t.code}">${esc(t.name)}</button>`).join('')}<button class="btn" data-dl="ext">Außerkanonische Schriften</button></div><p class="progress" id="dlp"></p></div>
+    <div class="opts">${CAT.translations.filter(t => !t.own).map(t => `<button class="btn" data-dl="${t.code}">${esc(t.name)}</button>`).join('')}<button class="btn" data-dl="ext">Außerkanonische Schriften</button></div><p class="progress" id="dlp"></p></div>
   <div class="set"><h3>Über die Texte</h3><p>Herkunft, Übersetzungen und Urheberrecht.</p><div class="opts"><a class="btn" href="#/quellen">${I.info}Quellen anzeigen</a></div></div>
   <div class="set"><h3>Zurücksetzen</h3><div class="opts"><button class="btn warn" id="wipe">Alle eigenen Daten löschen</button></div><p>Version ${APP_VERSION}</p></div>`;
   $$('[data-tr]', view).forEach(b => b.onclick = () => { S.set.tr = b.dataset.tr; save(); searchState.results = null; viewMore(); });
@@ -782,6 +797,7 @@ function viewMore() {
   $('#exp').onclick = exportData;
   $('#imp').onclick = () => $('#impf').click();
   $('#impf').onchange = importData;
+  euBind();
   $$('[data-dl]', view).forEach(b => b.onclick = () => downloadAll(b.dataset.dl));
   $('#wipe').onclick = () => {
     if (!confirm('Wirklich ALLE Lesefortschritte, Markierungen, Themen, Notizen, Lieblinge, Lesepläne, Gebete und Verskarten löschen?')) return;
@@ -851,12 +867,71 @@ async function downloadAll(code) {
   try { await loadJSON(`${code}.json`); if (p) p.textContent = `${name} ist jetzt offline verfügbar.`; }
   catch (e) { if (p) p.textContent = `${name} konnte nicht geladen werden – Internetverbindung prüfen.`; }
 }
+/* ---------------- Eigene Übersetzung (EÜ) importieren ---------------- */
+function euSection() {
+  const m = euMeta();
+  return `<div class="set"><h3>Einheitsübersetzung</h3>
+    <p>${m ? `Importiert am ${esc(new Date(m.date).toLocaleDateString('de-DE'))} (${m.books.length} Bücher). Der Text liegt nur auf diesem Gerät und ist nicht in Sicherungen enthalten – auf einem neuen Gerät die EPUB-Datei einfach erneut importieren.`
+      : 'Hast du die Einheitsübersetzung als E-Book (EPUB ohne Kopierschutz) gekauft, kannst du sie hier laden. Der Text bleibt nur auf diesem Gerät. Lesestand, Markierungen und Notizen bleiben erhalten: Die Verse werden auf die Zählung der App umgerechnet.'}</p>
+    <div class="opts"><button class="btn" id="euimp">${m ? 'Neu importieren' : 'EPUB-Datei importieren'}</button>${m ? '<button class="btn" id="eurep">Prüfbericht</button><button class="btn warn" id="eudel">Entfernen</button>' : ''}
+    <input type="file" id="euf" accept=".epub,application/epub+zip" class="hidden"></div><p class="progress" id="eup"></p></div>`;
+}
+function euBind() {
+  const f = $('#euf'); if (!f) return;
+  $('#euimp').onclick = () => f.click();
+  f.onchange = async () => { const file = f.files[0]; f.value = ''; if (file) await euImport(file); };
+  if ($('#eurep')) $('#eurep').onclick = () => euReport(euMeta());
+  if ($('#eudel')) $('#eudel').onclick = async () => {
+    if (!confirm('Einheitsübersetzung von diesem Gerät entfernen? Deine Markierungen und Notizen bleiben erhalten.')) return;
+    await EU.remove(); fileCache.delete(EU.URL); if (S.set.tr === 'eu') { S.set.tr = 'lut'; save(); } toast('Entfernt'); viewMore();
+  };
+}
+async function euImport(file) {
+  const p = $('#eup'), say = s => { if (p) p.textContent = s; };
+  if (!('DecompressionStream' in window) || !('caches' in window)) { say('Dieser Browser kann EPUB-Dateien nicht entpacken. Bitte Chrome oder Safari ab Version 16.4 verwenden.'); return; }
+  try {
+    say('Datei wird gelesen …');
+    const raw = await EU.readEpub(await file.arrayBuffer(), say);
+    const n = Object.keys(raw.books).length;
+    if (n < 40) { euDiag(raw); say(''); return; }
+    say('Lade Luther und Menge zum Abgleich …');
+    const [lut, men] = await Promise.all([loadJSON('lut.json'), loadJSON('men.json')]);
+    const { data, rep } = await EU.build(raw, lut, men, CAT, say);
+    const meta = { date: new Date().toISOString(), file: file.name, books: Object.keys(data), rep };
+    say('Speichern …');
+    await EU.save(data, meta); fileCache.delete(EU.URL);
+    S.set.tr = 'eu'; save(); searchState.results = null;
+    say(''); viewMore(); euReport(meta);
+  } catch (e) { say('Import fehlgeschlagen: ' + (e && e.message || e) + '. Deine bisherigen Daten sind unverändert.'); }
+}
+// Struktur nicht erkannt: Diagnose ohne Bibeltext (nur Buchkennungen, Zähler, Klassennamen), zum Weitergeben an den Entwickler
+function euDiag(raw) {
+  const d = Object.assign({}, raw.diag, { books: Object.fromEntries(Object.entries(raw.books).map(([b, a]) => [b, a.length])) });
+  const txt = JSON.stringify(d, null, 1);
+  openDlg(`<h3>Aufbau nicht erkannt</h3><p>In der Datei wurden nur ${Object.keys(raw.books).length} Bücher gefunden. Es wurde nichts gespeichert, deine Daten sind unverändert. Die folgende Diagnose enthält keinen Bibeltext, nur die Struktur der Datei – damit lässt sich der Import anpassen.</p><textarea readonly rows="8">${esc(txt)}</textarea><div class="row"><button class="btn" id="dcopy">Kopieren</button><button class="btn" data-close>Schließen</button></div>`, dl => {
+    $('#dcopy', dl).onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Kopiert'); } catch (e) {} };
+  });
+}
+function euReport(m) {
+  if (!m) return;
+  const r = m.rep, nm = id => (BOOK[id] || {}).name || id;
+  const rows = r.books.map(b => b.total !== undefined ? `<tr><td>${esc(nm(b.id))}</td><td colspan="4">${b.filled} von ${b.total} Versen aus der EÜ zugeordnet</td></tr>`
+    : (b.merged || b.split || b.empty || b.moved || b.orphanVerses) ? `<tr><td>${esc(nm(b.id))}</td><td>${b.moved || ''}</td><td>${b.merged || ''}</td><td>${b.split || ''}</td><td>${(b.empty || 0) + (b.orphanVerses || 0) || ''}</td></tr>` : '').join('');
+  const same = r.books.filter(b => b.total === undefined && !(b.merged || b.split || b.empty || b.moved || b.orphanVerses)).length;
+  openDlg(`<h3>Prüfbericht Einheitsübersetzung</h3>
+    <p>${r.books.length} Bücher übernommen, davon ${same} mit genau gleicher Verszählung wie in der App.${r.missing.length ? ` Nicht gefunden: ${esc(r.missing.map(nm).join(', '))} – dort bleibt der bisherige Text.` : ''}</p>
+    ${rows ? `<p class="muted">Abweichungen – versch.: andere Verszahl, zus.: zwei EÜ-Verse in einem Vers der App, geteilt: ein EÜ-Vers über zwei Verse der App, leer: ohne Gegenstück.</p><div class="tblwrap"><table class="eurep"><tr><th>Buch</th><th>versch.</th><th>zus.</th><th>geteilt</th><th>leer</th></tr>${rows}</table></div>` : ''}
+    ${r.warn.length ? `<p class="muted">Hinweise:</p><ul>${r.warn.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
+    <p class="muted">Lesestand, Markierungen und Notizen hängen weiter an der Verszählung der App und bleiben unverändert.</p>
+    <div class="row"><button class="btn" data-close>Schließen</button></div>`);
+}
 function viewSources() {
   setTab('more'); setBodyKind('c');
   setTop(`<button class="iconbtn" onclick="history.back()" aria-label="Zurück">${I.back}</button><h1>Quellen</h1>`);
   view.innerHTML = `<div class="about">
   <div class="set" style="border-top:0"><h3>Bibelübersetzungen</h3>
     <p><b>Luther 1912</b> – Revision der Lutherbibel von 1912, gemeinfrei. Datei: open-bibles (github.com/seven1m/open-bibles). Wörter in Klammern sind Worterklärungen dieser Ausgabe.</p>
+    <p><b>Einheitsübersetzung</b> – © 2016 Katholische Bibelanstalt GmbH, Stuttgart. Nicht Teil dieser App: Wer das E-Book (EPUB ohne Kopierschutz) besitzt, kann es unter „Mehr“ importieren. Der Text bleibt nur auf dem eigenen Gerät, wird nicht in Sicherungen exportiert und nirgends hochgeladen. Beim Import werden die Verse automatisch auf die Zählung der App (Luther 1912, Apokryphen: Menge 1939) umgerechnet; Abweichungen zeigt der Prüfbericht.</p>
     <p><b>Elberfelder 1905</b>, <b>Schlachter 1951</b>, <b>Menge 1939</b> (inkl. Apokryphen) – aus scrollmapper/bible_databases (GitHub). Die Elberfelder 1905 und die Menge-Bibel 1939 sind gemeinfrei. Für die Schlachter-Bibel 1951 nennt ebible.org die Genfer Bibelgesellschaft als Rechteinhaberin und die Lizenz Creative Commons Namensnennung 4.0 (CC BY 4.0). Dass unser Text mit der dort veröffentlichten Fassung übereinstimmt, ist nicht Zeichen für Zeichen geprüft.</p></div>
   <div class="set"><h3>Außerkanonische Schriften</h3>
     <p>Englische Übersetzungen aus scrollmapper/bible_databases_deuterocanonical und der Reihe „Ante-Nicene Fathers“ (1885–1896). Ausgewählt wurden nur Texte, deren Übersetzung alt genug für Gemeinfreiheit ist. Die Übersetzerangaben bei jeder Schrift beruhen auf dem Textvergleich; wo „vermutlich“ steht, ist die Zuordnung nicht gesichert. Bei Texten aus den „Ante-Nicene Fathers“ sind Absätze in Sätze zerlegt; die Nummern sind daher Satz-, keine Versnummern.</p>

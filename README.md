@@ -7,6 +7,18 @@ Version 2, Stand Sitzung 3 (damit ist Version 2 abgeschlossen; Anzeige unter **M
 - Sitzung 2: Verskarten zum wörtlichen Auswendiglernen, Einführung zu jedem Buch (106), 16 Themen-Lesewege, neuer Übersetzungsvergleich.
 - Sitzung 3: Zeitleiste (11 Epochen, 132 Ereignisse mit Jahresspannen und Sicherheitsstufe), Personen- und Ortsregister (213 Personen, 102 Orte, Stellenverweise, Suche, optional antippbare Namen im Text), Barrierefreiheit (Kontrast in Hell/Sepia/Dunkel gemessen, Tippflächen, Namen der Bedienelemente), Stichprobe „Didache auf Deutsch“ als KI-Übertragung aus dem Englischen. Die Recherche zu einer besseren Textfassung ergab nichts frei Lizenziertes und Vollständiges (siehe `LIZENZ-RECHERCHE.md` im Projektordner).
 
+## Einheitsübersetzung (eigene Datei)
+
+Die Einheitsübersetzung 2016 (© Katholische Bibelanstalt) ist **nicht** im Repository. Wer das E-Book als EPUB ohne Kopierschutz gekauft hat, lädt es in der App unter **Mehr → Einheitsübersetzung → EPUB-Datei importieren** (`eu.js`).
+
+- Der Text bleibt nur auf dem Gerät (Cache `bibel-eigen`, den der Service Worker nie löscht). Er steht nicht in Sicherungen und wird nirgends hochgeladen. Auf einem neuen Gerät die EPUB-Datei erneut importieren.
+- Beim Import werden die Verse auf die Zählung der App umgerechnet: Kanon wie Luther 1912, Apokryphen wie Menge 1939. Die Zuordnung läuft über Textähnlichkeit und Verszahl (Ausrichtung je Buch). Lesestand, Markierungen, Notizen, Lieblinge, Pläne und Verskarten bleiben dadurch unverändert gültig.
+- Zusätze: Ester-Verse mit Buchstaben (1,1a …) und Dan 3,24–90 sowie Dan 13–14 landen in „Zusätze zu Ester/Daniel“. Gebet Manasses gibt es in der EÜ nicht; es bleibt Menge. Die außerkanonischen Schriften sind nicht betroffen.
+- Zwischenüberschriften und Absätze der EÜ werden übernommen. Abweichende EÜ-Verszahlen stehen am Kapitelende, die Übersicht im **Prüfbericht**.
+- Erkennt der Import den Aufbau der Datei nicht, wird nichts gespeichert. Die App zeigt dann eine Diagnose ohne Bibeltext (nur Buchkennungen, Zähler, Klassennamen), mit der sich der Einleser anpassen lässt.
+- Getestet ist das bisher nur mit einer selbst gebauten Test-EPUB (Menge-Text in EÜ-Zählung). Die echte EÜ-Datei ist noch nicht geprüft.
+- Test der Umrechnung: `node test_eu.js` (künstliche Quelle aus Menge mit Daniel-/Ester-Zusätzen, fehlendem Vers, zusammengelegten Versen; prüft jeden Vers und dass kein Text verloren geht).
+
 ## Auf GitHub Pages veröffentlichen
 
 1. Auf GitHub ein neues Repository anlegen (z. B. `bibel`), öffentlich.
@@ -17,11 +29,11 @@ Version 2, Stand Sitzung 3 (damit ist Version 2 abgeschlossen; Anzeige unter **M
 
 ## Update einspielen
 
-Alle geänderten Dateien hochladen und in `sw.js` die Zeile `const SHELL = 'bibel-v6'` hochzählen (`bibel-v7` …). Sonst zeigt das Handy weiter die alte Version. Ändert sich ein Bibeltext, zusätzlich `const DATA = 'bibel-data-v2'` hochzählen. Die App danach einmal ganz schließen und neu öffnen.
+Alle geänderten Dateien hochladen und in `sw.js` die Zeile `const SHELL = 'bibel-v7'` hochzählen (`bibel-v8` …). Sonst zeigt das Handy weiter die alte Version. Ändert sich ein Bibeltext, zusätzlich `const DATA = 'bibel-data-v2'` hochzählen. Die App danach einmal ganz schließen und neu öffnen.
 
 Neu oder geändert in Sitzung 3 (gegenüber Stand Sitzung 2): `app.js`, `style.css`, `sw.js`, `index.html`, `zeit.js`, `register.js`, `data/zeit.json`, `data/register.json`, `data/ext-de.json` (und diese `README.md`). Die Bibeltexte haben sich nicht geändert. `data/ext-de.json` (Didache auf Deutsch, KI-Übertragung) ist optional: ohne diese Datei läuft die App normal, nur der Schalter „Deutsch (KI)“ im Text der Didache fehlt.
 
-Stand jetzt: SHELL `bibel-v6`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
+Stand jetzt: SHELL `bibel-v7`, DATA `bibel-data-v2`. Zeitleiste und Register gehören zum SHELL-Cache; `ext-de.json` liegt wie die anderen Texte im DATA-Cache und wird erst beim ersten Öffnen geladen.
 
 **Flache Version:** Wer ohne Unterordner hochlädt, erzeugt sie mit `python3 make_flat.py` (Ausgabe im Ordner `bibel-flat` neben dem Projekt); alle Dateien liegen dort in einer Ebene.
 

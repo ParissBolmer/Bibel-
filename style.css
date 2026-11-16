@@ -552,3 +552,11 @@ a.iconbtn{color:var(--ink)}
 .kinote{margin:0 0 14px;padding:11px 14px;border-radius:12px;background:var(--ochre-soft);border:1px dashed var(--ochre);font-family:var(--sans);font-size:13.5px;line-height:1.45;color:var(--ink)}
 .kinote b{font-weight:700}
 .kinote a{color:var(--ink);font-weight:600}
+/* Einheitsübersetzung: Zwischenüberschriften, Absätze, Lücken, Prüfbericht */
+.reader .peri{display:block;font-family:var(--sans);font-weight:700;font-size:.78em;letter-spacing:.01em;color:var(--ink2,inherit);margin:1.1em 0 .35em}
+.reader .peri:first-child{margin-top:.2em}
+.reader .pbr{display:block;height:.55em}
+.reader .vgap .muted{font-size:.8em}
+.tblwrap{overflow-x:auto}
+.eurep{border-collapse:collapse;font-size:.85em;width:100%}
+.eurep th,.eurep td{padding:.25em .4em;border-bottom:1px solid var(--line,#ddd);text-align:left;white-space:nowrap}

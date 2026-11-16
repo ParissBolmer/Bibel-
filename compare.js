@@ -4,9 +4,9 @@
    Einstellungen in S.set.cmp = { on: [Codes], base: Code, mode: 'karten'|'spalten' } */
 
 const cmpSet = () => {
-  const c = S.set.cmp = Object.assign({ on: CAT.translations.map(t => t.code), base: S.set.tr, mode: 'karten' }, S.set.cmp || {});
-  c.on = c.on.filter(code => CAT.translations.some(t => t.code === code));
-  if (c.on.length < 2) c.on = CAT.translations.slice(0, 2).map(t => t.code);
+  const c = S.set.cmp = Object.assign({ on: trList().map(t => t.code), base: S.set.tr, mode: 'karten' }, S.set.cmp || {});
+  c.on = c.on.filter(code => trList().some(t => t.code === code));
+  if (c.on.length < 2) c.on = trList().slice(0, 2).map(t => t.code);
   if (!c.on.includes(c.base)) c.base = c.on[0];
   return c;
 };
@@ -41,14 +41,14 @@ async function viewCompare(bk, ch, rng) {
   if (!CMP || CMP.book !== book || CMP.ch !== ch || CMP.v1 !== (a || 0) || CMP.v2 !== (z || 0)) {
     CMP = { book, ch, v1: a || 0, v2: z || 0, texts: {}, vbase: {} };
     view.innerHTML = '<p class="muted">Lädt die Übersetzungen …</p>';
-    for (const t of CAT.translations) { try { CMP.texts[t.code] = ((await chaptersOf(book, t.code))[ch - 1] || { v: [] }).v; } catch (e) { CMP.texts[t.code] = null; } }
+    for (const t of trList()) { try { CMP.texts[t.code] = ((await chaptersOf(book, t.code))[ch - 1] || { v: [] }).v; } catch (e) { CMP.texts[t.code] = null; } }
     if (!location.hash.startsWith('#/vgl/')) return;
   }
   const lens = Object.values(CMP.texts).filter(Boolean).map(v => v.length);
   const maxV = lens.length ? Math.max(...lens) : 0;
   const v1 = CMP.v1 || 1, v2 = CMP.v1 ? Math.min(CMP.v2 || CMP.v1, maxV) : maxV;
-  const on = CAT.translations.filter(t => set.on.includes(t.code));
-  let html = `<div class="cmpbar"><div class="filters" style="margin:0">${CAT.translations.map(t => `<button class="chip ${set.on.includes(t.code) ? 'on' : ''}" data-tg="${t.code}">${esc(t.name.replace(/ \d{4}$/, ''))}</button>`).join('')}</div>
+  const on = trList().filter(t => set.on.includes(t.code));
+  let html = `<div class="cmpbar"><div class="filters" style="margin:0">${trList().map(t => `<button class="chip ${set.on.includes(t.code) ? 'on' : ''}" data-tg="${t.code}">${esc(t.name.replace(/ \d{4}$/, ''))}</button>`).join('')}</div>
     <div class="filters" style="margin:8px 0 0"><button class="chip ${set.mode === 'karten' ? 'on' : ''}" data-mode="karten">Karten</button><button class="chip ${set.mode === 'spalten' ? 'on' : ''}" data-mode="spalten">Spalten</button>
     ${CMP.v1 ? `<a class="chip" href="#/vgl/${encodeURIComponent(book.key)}/${ch}">Ganzes Kapitel</a>` : ''}</div></div>
     <p class="muted cmplegend"><mark class="df">Markiert</mark> = weicht vom Bezugstext ab (<b>${esc(trName(set.base))}</b>). ${set.mode === 'karten' ? 'Tippe auf den Namen einer Fassung, um sie für diesen Vers zum Bezug zu machen.' : 'Tippe auf einen Spaltenkopf, um den Bezug zu wechseln.'}</p>`;
@@ -76,7 +76,7 @@ async function viewCompare(bk, ch, rng) {
   $$('[data-tg]', view).forEach(b => b.onclick = () => {
     const c = b.dataset.tg, i = set.on.indexOf(c);
     if (i >= 0) { if (set.on.length <= 2) { toast('Mindestens zwei Fassungen'); return; } set.on.splice(i, 1); } else set.on.push(c);
-    set.on.sort((x, y) => CAT.translations.findIndex(t => t.code === x) - CAT.translations.findIndex(t => t.code === y)); again();
+    set.on.sort((x, y) => trList().findIndex(t => t.code === x) - trList().findIndex(t => t.code === y)); again();
   });
   $$('[data-mode]', view).forEach(b => b.onclick = () => { set.mode = b.dataset.mode; again(); });
   $$('[data-cb]', view).forEach(b => b.onclick = () => { set.base = b.dataset.cb; CMP.vbase = {}; again(); });

@@ -1,8 +1,8 @@
 // Bei jedem Update der App-Dateien diese Nummer erhöhen (bibel-v5, bibel-v6 …)
-const SHELL = 'bibel-v6';
+const SHELL = 'bibel-v7';
 const DATA = 'bibel-data-v2'; // nur ändern, wenn sich Bibeltexte ändern (V2/Sitzung 1: Menge bereinigt)
 
-const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plans.js', 'prayer.js', 'cards.js', 'compare.js', 'paths.js', 'intro.js', 'zeit.js', 'register.js', 'manifest.webmanifest',
+const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plans.js', 'prayer.js', 'cards.js', 'compare.js', 'paths.js', 'intro.js', 'zeit.js', 'register.js', 'eu.js', 'manifest.webmanifest',
   'catalog.json', 'plaene.json', 'themen.json', 'einf.json', 'zeit.json', 'register.json',
   'icon-192.png', 'icon-512.png',
   'literata-latin-400-normal.woff2', 'literata-latin-400-italic.woff2', 'literata-latin-600-normal.woff2',
@@ -12,8 +12,9 @@ self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
 });
 
+// Beim Aufräumen alter Caches bleibt „bibel-eigen“ (importierte Einheitsübersetzung) immer erhalten
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== SHELL && k !== DATA).map(k => caches.delete(k))))
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== SHELL && k !== DATA && k !== 'bibel-eigen').map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
