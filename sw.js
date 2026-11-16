@@ -9,7 +9,7 @@ const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'refs.js', 'plan
   'figtree-latin-400-normal.woff2', 'figtree-latin-600-normal.woff2', 'figtree-latin-700-normal.woff2'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 // Beim Aufräumen alter Caches bleibt „bibel-eigen“ (importierte Einheitsübersetzung) immer erhalten

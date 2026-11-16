@@ -965,6 +965,11 @@ function viewSources() {
   indexCatalog();
   if (S.plans.length) { try { await loadPlans(); planSync(); } catch (e) {} }
   route();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // Neue App-Version: sobald der neue Service Worker übernimmt, einmal automatisch neu laden
+    const hadSW = !!navigator.serviceWorker.controller; let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadSW && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+  }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 })();
