@@ -104,6 +104,8 @@ const EU = (() => {
     const head = el => el ? '<' + el.localName + (el.getAttribute('class') ? '.' + el.getAttribute('class') : '') + '>' : '';
     return (prev ? 'davor ' + head(prev) + ' · ' : '') + head(blk) + ' ' + ser(blk, 0);
   }
+  // Element enthält nur Inline-Auszeichnung (Links, Hochstellung …), keine Blöcke
+  const inlineOnly = el => [...el.getElementsByTagName('*')].every(d => /^(a|sup|sub|span|b|strong|em|i|small)$/.test(d.localName));
   async function readEpub(buf, progress) {
     const z = await unzip(buf);
     const cont = parseXml(await z.text('META-INF/container.xml') || '');
@@ -157,7 +159,7 @@ const EU = (() => {
           if (anchors.size && n.querySelectorAll && (/^h[1-6]$/.test(tag) || n.children.length)) for (const d of n.querySelectorAll('[id]')) { if (anchors.has(d.getAttribute('id')) && (/^h[1-6]$/.test(tag) || !n.textContent.trim())) setBook(anchors.get(d.getAttribute('id'))); }
           if (tag === 'p' && isNotePara(n)) { diag.notes++; continue; }
           if (tag === 'script' || tag === 'style' || tag === 'aside' || /footnote|endnote|noteref|rearnote/.test(etype) || SKIP_CLASS.test(cls)) { diag.notes++; continue; }
-          const txt = (n.textContent || '').replace(/\s+/g, '').replace(/[.:]$/, '');
+          const txt = (n.textContent || '').replace(/[\s\u200b\u00ad]+/g, '').replace(/[.:]$/, '');
           if (/^h[1-6]$/.test(tag)) {
             const bid = !anchors.size && bookIdOf(n.textContent);
             if (bid && (!book || bid !== book) && tag <= 'h2') { setBook(bid); continue; }
@@ -165,8 +167,11 @@ const EU = (() => {
             if (book) { const h = (n.textContent || '').replace(/\s+/g, ' ').trim(); if (h) pendingH = pendingH ? pendingH + ' · ' + h : h; }
             continue;
           }
-          if (isNum(txt) && n.children.length === 0 && book) {
-            if (CHAP_CLASS.test(cls) && !VERSE_CLASS.test(cls)) { const nc = parseInt(txt, 10); if (nc !== ch + 1) jump(n, 'Kapitel ' + ch + ' → ' + nc); ch = nc; startVerse(ch, '1'); diag.chapMarks++; continue; }
+          if (book && (VERSE_CLASS.test(cls) || CHAP_CLASS.test(cls)) && !isNum(txt) && txt.length <= 8) { const k = tag + '.' + cls + ' ' + [...txt].map(c => /[0-9a-z]/i.test(c) ? c : 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')).join(' '); (diag.oddMarks = diag.oddMarks || {})[k] = ((diag.oddMarks || {})[k] || 0) + 1; }
+          if (isNum(txt) && book && (n.children.length === 0 || inlineOnly(n))) {   // auch Zahl mit Link darin: <span class="fontx"><a/><a>8</a></span>
+            if (CHAP_CLASS.test(cls) && !VERSE_CLASS.test(cls)) { const nc = parseInt(txt, 10); if (nc !== ch + 1) jump(n, 'Kapitel ' + ch + ' → ' + nc);
+              if (nc === 1 && books[book].length) { diag.introDropped = (diag.introDropped || 0) + books[book].length; books[book].length = 0; cur = null; }   // Zahlen aus der Einleitung vor Kapitel 1 verwerfen
+              ch = nc; startVerse(ch, '1'); diag.chapMarks++; continue; }
             if (tag === 'sup' || VERSE_CLASS.test(cls)) {
               if (n.closest && n.closest('a') && /^[a-z*†]$/.test(txt)) { diag.notes++; continue; }
               const v = txt; if (!ch) ch = 1;
@@ -386,6 +391,9 @@ const EU = (() => {
           if (diff.length) add('  ' + id + ' (' + diff.length + '): ' + diff.slice(0, 14).join(' ') + (diff.length > 14 ? ' …' : ''));
         });
       }
+      if (r.diag.introDropped) add('Verworfene Zahlen aus Einleitungen (vor Kapitel 1): ' + r.diag.introDropped);
+      add('Nicht-numerische Inhalte von Vers-/Kapitelmarken (Zeichen als Unicode):');
+      Object.entries(r.diag.oddMarks || {}).slice(0, 25).forEach(([k, n]) => add('  ' + k + ' ×' + n));
       add('Unerwartete Nummern (je Buch höchstens 4), Fundstelle in ⟦ ⟧, [n] = Text mit n Zeichen:');
       r.diag.jumps.forEach(j => add('  ' + j.b + ' ' + j.what + ' :: ' + j.ctx));
       add('Bücher im Einzelnen:');
